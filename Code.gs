@@ -223,6 +223,9 @@ function handleAction(action, data, method) {
     case "getActivityLogs":
       return getActivityLogs(ss, data);
 
+    case "verifyAndLoadTeamPortal":
+      return verifyAndLoadTeamPortal(data.token || data.teamId, data.email);
+
     case "getSettings":
       return handleSettings(ss, "getSettings", data);
 
@@ -1571,159 +1574,359 @@ function escapeHtml(str) {
  * ==========================================================================
  */
 
+/**
+ * verifyAndLoadTeamPortal (called via google.script.run from the HTML email gate)
+ * Checks the entered email against team membership and returns team data only if authorized.
+ * Admins and organizers can access any team by email.
+ */
+function verifyAndLoadTeamPortal(token, emailEntered) {
+  var ss = getSpreadsheet();
+  emailEntered = (emailEntered || "").trim().toLowerCase();
+
+  if (!emailEntered) {
+    throw new Error("Please enter your registered email address to access your team pass.");
+  }
+
+  // Find team by QR token
+  var teams = getTeams(ss);
+  var team = null;
+  for (var i = 0; i < teams.length; i++) {
+    if (teams[i].qrCodeToken === token) {
+      team = teams[i];
+      break;
+    }
+  }
+
+  if (!team) {
+    throw new Error("INVALID_QR: This QR code is not registered or has been revoked. Please contact an organizer.");
+  }
+
+  // Check if requester is admin or organizer (any registered admin/organizer email bypasses the member check)
+  var users = getSheetObjects(ss.getSheetByName(SHEETS.USERS));
+  var callerUser = null;
+  for (var u = 0; u < users.length; u++) {
+    if (String(users[u].Email || "").trim().toLowerCase() === emailEntered) {
+      callerUser = users[u];
+      break;
+    }
+  }
+
+  var isAdminOrOrganizer = callerUser &&
+    (String(callerUser.Role).toLowerCase() === "admin" ||
+     String(callerUser.Role).toLowerCase() === "organizer") &&
+    String(callerUser.Status).toLowerCase() === "active";
+
+  if (isAdminOrOrganizer) {
+    // Admins and organizers can view any team — return full data with privilege flag
+    logActivity(ss, callerUser.UserID, callerUser.Name, callerUser.Role, "Admin Portal View",
+      "Viewed team portal: " + team.teamName + " (" + team.teamId + ")");
+    return { team: team, accessLevel: "ADMIN", viewerName: callerUser.Name, viewerRole: callerUser.Role };
+  }
+
+  // Collect all member emails for this team
+  var memberEmails = [
+    (team.leaderEmail || "").trim().toLowerCase(),
+    (team.member2Email || "").trim().toLowerCase(),
+    (team.member3Email || "").trim().toLowerCase(),
+    (team.member4Email || "").trim().toLowerCase()
+  ].filter(function(e) { return e !== ""; });
+
+  if (memberEmails.indexOf(emailEntered) === -1) {
+    // Log unauthorized access attempt
+    logActivity(ss, emailEntered, emailEntered, "unknown", "Unauthorized QR Access Attempt",
+      "Email " + emailEntered + " tried to access team " + team.teamId + " portal but is not a registered member.");
+    throw new Error(
+      "ACCESS_DENIED: Your email (" + emailEntered + ") is not registered as a member of team \"" +
+      team.teamName + "\". Only registered team members can access this pass.\n\nIf you believe this is an error, please contact your organizer."
+    );
+  }
+
+  // Determine which member role this person is
+  var memberRole = "Team Member";
+  if ((team.leaderEmail || "").trim().toLowerCase() === emailEntered) {
+    memberRole = "Team Leader";
+  }
+
+  logActivity(ss, emailEntered, emailEntered, "team", "Team Portal Access",
+    memberRole + " " + emailEntered + " accessed team portal for " + team.teamName);
+
+  return { team: team, accessLevel: "MEMBER", memberRole: memberRole, viewerEmail: emailEntered };
+}
+
+/**
+ * renderCloudTeamPortal — Shows Email Identity Gate first.
+ * After the user enters their email and it is verified server-side by verifyAndLoadTeamPortal(),
+ * the full team portal is rendered client-side via google.script.run.
+ */
 function renderCloudTeamPortal(teamId, token) {
   var ss = getSpreadsheet();
-  var team = getTeam(ss, teamId || token);
-  var configs = getRoundConfig(ss);
 
-  var isProblemActive = false;
-  var isR1Active = false;
-  var isR2Active = false;
-
-  for (var i = 0; i < configs.length; i++) {
-    var cid = (configs[i].roundId || "").toLowerCase();
-    var cstat = (configs[i].status || "").toLowerCase();
-    if (cid === "problem_statements" && cstat === "active") isProblemActive = true;
-    if (cid === "round1" && cstat === "active") isR1Active = true;
-    if (cid === "round2" && cstat === "active") isR2Active = true;
+  // Determine the lookup token/id to embed in the page
+  var lookupToken = token || teamId || "";
+  if (!lookupToken) {
+    return HtmlService.createHtmlOutput(
+      '<html><body style="background:#0B132B;color:#E2E8F0;font-family:system-ui;padding:40px;text-align:center;">' +
+      '<h2 style="color:#EF4444;">⚠ Invalid QR Code</h2>' +
+      '<p>This QR badge link is invalid or missing. Please present your physical QR badge to be scanned by an organizer.</p>' +
+      '</body></html>'
+    ).setTitle("Invalid QR — HackTrack");
   }
 
-  var isSubmitted = (team.submissionLocked === true || team.submissionLocked === "true" || team.problemSubmitted === true || team.problemSubmitted === "true");
-
-  var safeTeamName = escapeHtml(team.teamName);
-  var safeTeamId = escapeHtml(team.teamId);
-  var safeCollege = escapeHtml(team.college);
-  var safeDept = escapeHtml(team.department);
-  var safeLeaderName = escapeHtml(team.leaderName);
-  var safeLeaderEmail = escapeHtml(team.leaderEmail);
-  var safeProjectTitle = escapeHtml(team.projectTitle || "Pending Statement");
-  var safeDomain = escapeHtml(team.domain || "AI/ML");
-  var safePS = escapeHtml(team.problemStatement || "Pending Release");
-
-  var html = '<!DOCTYPE html>' +
-  '<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">' +
-  '<title>Team Live Pass — Synora\'26</title>' +
+  // Build the email gate + dynamic portal page
+  var html = '<!DOCTYPE html><html lang="en"><head>' +
+  '<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">' +
+  '<title>Team Identity Verification — Synora\'26</title>' +
   '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">' +
   '<style>' +
-  'body { background:#0B132B; color:#E2E8F0; font-family:system-ui,-apple-system,sans-serif; padding:18px 12px; }' +
-  '.card-box { background:#1C2541; border:1px solid #3A506B; border-radius:14px; padding:18px; margin-bottom:16px; box-shadow:0 8px 24px rgba(0,0,0,0.3); }' +
-  '.badge-tag { display:inline-block; padding:4px 10px; border-radius:8px; font-weight:700; font-size:0.75rem; }' +
-  '.btn-action { background:linear-gradient(135deg, #2563EB, #06B6D4); border:none; color:#fff; font-weight:700; border-radius:10px; padding:12px; width:100%; cursor:pointer; }' +
-  'input, select, textarea { background:#0B132B !important; color:#fff !important; border:1px solid #3A506B !important; border-radius:8px; padding:10px; width:100%; margin-bottom:12px; }' +
+  ':root{--bg:#0B132B;--card:#1C2541;--border:#3A506B;--accent:#06B6D4;--warn:#F59E0B;--success:#10B981;--danger:#EF4444;}' +
+  'body{background:var(--bg);color:#E2E8F0;font-family:system-ui,-apple-system,sans-serif;padding:16px 12px;min-height:100vh;}' +
+  '.card-box{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:20px;margin-bottom:16px;box-shadow:0 8px 32px rgba(0,0,0,0.35);}' +
+  '.btn-primary-custom{background:linear-gradient(135deg,#2563EB,#06B6D4);border:none;color:#fff;font-weight:700;border-radius:10px;padding:13px;width:100%;cursor:pointer;font-size:1rem;transition:opacity .2s;}' +
+  '.btn-primary-custom:hover{opacity:.88;}' +
+  'input{background:#0B132B!important;color:#fff!important;border:1px solid var(--border)!important;border-radius:8px;padding:10px 14px;width:100%;margin-bottom:4px;font-size:1rem;}' +
+  'input:focus{border-color:var(--accent)!important;outline:none!important;box-shadow:0 0 0 2px rgba(6,182,212,.25)!important;}' +
+  'select,textarea{background:#0B132B!important;color:#fff!important;border:1px solid var(--border)!important;border-radius:8px;padding:10px;width:100%;margin-bottom:12px;}' +
+  '.member-badge{display:inline-block;background:rgba(6,182,212,.12);border:1px solid var(--accent);color:var(--accent);border-radius:8px;padding:3px 10px;font-size:.78rem;font-weight:600;margin-bottom:4px;}' +
+  '.spinner{display:inline-block;width:18px;height:18px;border:3px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:8px;}' +
+  '@keyframes spin{to{transform:rotate(360deg)}}' +
+  '#gateScreen,#portalScreen{transition:opacity .3s;}' +
+  '.portal-hidden{display:none!important;}' +
   '</style></head><body>' +
-  '<div class="container" style="max-width:550px;">' +
-  '<div class="text-center mb-3">' +
-  '<div style="font-size:1.8rem;">⚙</div>' +
+
+  '<div class="container" style="max-width:540px;">' +
+
+  '<!-- HEADER -->' +
+  '<div class="text-center mb-4">' +
+  '<div style="font-size:2rem;margin-bottom:6px;">⚙</div>' +
   '<h3 class="fw-bold text-info mb-0">HackTrack Cloud Pass</h3>' +
-  '<p class="small text-secondary">Synora\'26 Flagship Hackathon</p>' +
+  '<p class="small text-secondary mb-0">Synora\'26 National Flagship Hackathon</p>' +
   '</div>' +
 
-  '<!-- 1. Team & Member Details (Locked View) -->' +
-  '<div class="card-box" style="border-left: 4px solid #06B6D4;">' +
-  '<div class="d-flex justify-content-between align-items-center mb-2">' +
-  '<h4 class="text-white fw-bold mb-0">' + safeTeamName + '</h4>' +
-  '<span class="badge bg-primary fs-6">' + safeTeamId + '</span>' +
+  '<!-- ==================== EMAIL GATE SCREEN ==================== -->' +
+  '<div id="gateScreen">' +
+  '<div class="card-box" style="border-left:4px solid var(--accent);">' +
+  '<div class="text-center mb-3">' +
+  '<div style="font-size:2.2rem;">🔐</div>' +
+  '<h5 class="fw-bold text-white mb-1">Identity Verification Required</h5>' +
+  '<p class="small text-secondary mb-0">Enter the email address you registered with. Only registered team members can access their pass.</p>' +
   '</div>' +
-  '<p class="small text-secondary mb-3">' + safeCollege + ' • ' + safeDept + '</p>' +
-  '<div class="d-flex justify-content-between align-items-center mb-2">' +
-  '<span class="text-uppercase text-secondary small fw-bold">Official Member Roster</span>' +
-  '<span class="badge bg-success">✓ Verified Pass</span>' +
+  '<label class="small text-secondary fw-bold mb-1" for="verifyEmail">Your Registered Email Address</label>' +
+  '<input type="email" id="verifyEmail" placeholder="e.g. rahul@college.edu" autocomplete="email" autofocus>' +
+  '<div id="emailError" class="small text-danger mb-2" style="display:none;"></div>' +
+  '<button class="btn-primary-custom mt-2" onclick="verifyIdentity()" id="verifyBtn">🔓 Verify & Open My Pass</button>' +
+  '<p class="small text-secondary text-center mt-3 mb-0">⚠ Only your registered email gives you access. Accessing another team\'s pass is not permitted and is logged.</p>' +
   '</div>' +
-  '<ul class="list-group list-group-flush mb-2">' +
-  '<li class="list-group-item bg-transparent text-white border-secondary px-0">👑 <b>' + safeLeaderName + '</b> <span class="small text-secondary">(' + safeLeaderEmail + ')</span></li>' +
-  (team.member2Name ? '<li class="list-group-item bg-transparent text-white border-secondary px-0">👤 ' + escapeHtml(team.member2Name) + (team.member2Email ? ' <span class="small text-secondary">(' + escapeHtml(team.member2Email) + ')</span>' : '') + '</li>' : '') +
-  (team.member3Name ? '<li class="list-group-item bg-transparent text-white border-secondary px-0">👤 ' + escapeHtml(team.member3Name) + (team.member3Email ? ' <span class="small text-secondary">(' + escapeHtml(team.member3Email) + ')</span>' : '') + '</li>' : '') +
-  (team.member4Name ? '<li class="list-group-item bg-transparent text-white border-secondary px-0">👤 ' + escapeHtml(team.member4Name) + (team.member4Email ? ' <span class="small text-secondary">(' + escapeHtml(team.member4Email) + ')</span>' : '') + '</li>' : '') +
-  '</ul></div>';
-
-  // 2. Problem Statement Module
-  if (isSubmitted) {
-    html += '<div class="card-box" style="border-color:#10B981;">' +
-    '<div class="d-flex justify-content-between align-items-center mb-2">' +
-    '<h5 class="text-success fw-bold mb-0">🔒 Project Submission Locked</h5>' +
-    '<span class="badge bg-success">Submitted</span>' +
-    '</div>' +
-    '<div class="mb-2"><span class="badge bg-info text-dark">' + safeDomain + '</span></div>' +
-    '<p class="fw-bold text-white mb-1">' + safeProjectTitle + '</p>' +
-    '<p class="small text-secondary mb-2">' + safePS + '</p>' +
-    '<div class="alert alert-info py-2 small mb-0" style="background:#0F2744; border:1px solid #1E4976; color:#93C5FD;">' +
-    '<b>One-Time Access Notice:</b> Submission is locked in Google Cloud.' +
-    '</div>' +
-    '</div>';
-  } else if (!isProblemActive) {
-    html += '<div class="card-box text-center py-4" style="border:1px dashed #F59E0B;">' +
-    '<div style="font-size:2rem; margin-bottom:8px;">🔒</div>' +
-    '<h5 class="text-warning fw-bold mb-1">Problem Statement: Locked (Release Pending)</h5>' +
-    '<p class="small text-secondary mb-0">Organizers have not yet opened the problem statement submission phase. Once released, this portal will unlock your 1-time submission form.</p>' +
-    '</div>';
-  } else {
-    html += '<div class="card-box" id="submissionBox" style="border-color:#F59E0B;">' +
-    '<div class="d-flex justify-content-between align-items-center mb-2">' +
-    '<h5 class="text-warning fw-bold mb-0">🔓 One-Time Problem Statement Submission</h5>' +
-    '<span class="badge bg-warning text-dark">1-Time Access</span>' +
-    '</div>' +
-    '<p class="small text-secondary mb-3">You have <b>one-time access</b> to submit. Once locked, this cannot be modified by the team.</p>' +
-    '<form id="problemForm" onsubmit="handleCloudSubmit(event)">' +
-    '<label class="small text-secondary">Select Domain *</label>' +
-    '<select id="subDomain" required>' +
-    '<option value="">Select Domain...</option>' +
-    '<option value="AI/ML">AI/ML</option><option value="Cyber Security">Cyber Security</option><option value="Cloud & DevOps">Cloud & DevOps</option>' +
-    '<option value="Web Development">Web Development</option><option value="IoT & Smart Hardware">IoT & Smart Hardware</option><option value="FinTech & Open Banking">FinTech & Open Banking</option>' +
-    '<option value="Healthcare & Blockchain">Healthcare & Blockchain</option><option value="Agriculture & ML">Agriculture & ML</option>' +
-    '</select>' +
-    '<label class="small text-secondary">Project Title *</label>' +
-    '<input type="text" id="subTitle" placeholder="e.g. Autonomous Vision Anomaly Detector" required>' +
-    '<label class="small text-secondary">Problem Statement / Tailored Summary *</label>' +
-    '<textarea id="subPS" rows="3" placeholder="Enter or select your problem statement details..." required></textarea>' +
-    '<button type="submit" id="lockBtn" class="btn-action mt-2">🔒 Lock In Problem Statement</button>' +
-    '</form>' +
-    '<div id="submitStatus" class="mt-3"></div>' +
-    '</div>';
-  }
-
-  // 3. Judging Rounds (200 Total Marks)
-  html += '<div class="card-box">' +
-  '<h6 class="text-secondary text-uppercase small fw-bold mb-2">Jury Evaluation Rounds (200 Max Marks)</h6>' +
-  '<div class="row g-2 text-center">' +
-  '<div class="col-6"><div class="p-2 border border-secondary rounded"><div class="small fw-bold">Round 1 (100)</div><span class="badge ' + (isR1Active ? 'bg-success' : 'bg-secondary') + '">' + (isR1Active ? 'ACTIVE' : 'LOCKED') + '</span></div></div>' +
-  '<div class="col-6"><div class="p-2 border border-secondary rounded"><div class="small fw-bold">Round 2 (100)</div><span class="badge ' + (isR2Active ? 'bg-success' : 'bg-secondary') + '">' + (isR2Active ? 'ACTIVE' : 'LOCKED') + '</span></div></div>' +
-  '</div></div>';
-
-  html += '<div class="text-center text-secondary small py-2">⚙ Synora\'26 Cloud System • Google Sheets Live Database</div>' +
   '</div>' +
+
+  '<!-- ==================== PORTAL SCREEN (hidden until verified) ==================== -->' +
+  '<div id="portalScreen" class="portal-hidden"></div>' +
+
+  '<div class="text-center text-secondary small py-2">⚙ Synora\'26 Cloud System • Google Sheets Live Database</div>' +
+  '</div>' +
+
   '<script>' +
+  'var LOOKUP_TOKEN = "' + escapeHtml(lookupToken) + '";' +
+  'var verifiedEmail = "";' +
+  'var teamData = null;' +
+  'var verifierRole = "";' +
+
+  'document.getElementById("verifyEmail").addEventListener("keydown", function(e){' +
+  '  if(e.key==="Enter") verifyIdentity();' +
+  '});' +
+
+  'function verifyIdentity() {' +
+  '  var email = document.getElementById("verifyEmail").value.trim();' +
+  '  var btn = document.getElementById("verifyBtn");' +
+  '  var errBox = document.getElementById("emailError");' +
+  '  errBox.style.display = "none";' +
+  '  if (!email || !email.includes("@")) {' +
+  '    errBox.textContent = "Please enter a valid email address.";' +
+  '    errBox.style.display = "block";' +
+  '    return;' +
+  '  }' +
+  '  btn.disabled = true;' +
+  '  btn.innerHTML = \'<span class="spinner"></span>Verifying identity...\';' +
+  '  google.script.run' +
+  '    .withSuccessHandler(function(result) {' +
+  '      verifiedEmail = email;' +
+  '      teamData = result.team;' +
+  '      verifierRole = result.accessLevel;' +
+  '      renderPortal(result);' +
+  '    })' +
+  '    .withFailureHandler(function(err) {' +
+  '      btn.disabled = false;' +
+  '      btn.innerHTML = "🔓 Verify & Open My Pass";' +
+  '      errBox.textContent = err.message || String(err);' +
+  '      errBox.style.display = "block";' +
+  '    })' +
+  '    .verifyAndLoadTeamPortal(LOOKUP_TOKEN, email);' +
+  '}' +
+
+  'function renderPortal(result) {' +
+  '  var t = result.team;' +
+  '  var isAdmin = result.accessLevel === "ADMIN";' +
+  '  var memberRole = result.memberRole || result.viewerRole || "Member";' +
+  '  document.getElementById("gateScreen").style.display = "none";' +
+  '  var p = document.getElementById("portalScreen");' +
+  '  p.classList.remove("portal-hidden");' +
+
+  '  var badge = isAdmin' +
+  '    ? \'<span class="badge bg-danger ms-2">👑 \' + (result.viewerRole||"ADMIN").toUpperCase() + \' VIEW</span>\'' +
+  '    : \'<span class="badge bg-success ms-2">✓ \' + memberRole + \'</span>\';' +
+
+  '  var memberList = "";' +
+  '  if(t.leaderName) memberList += \'<li class="list-group-item bg-transparent border-secondary text-white px-0">👑 <b>\' + esc(t.leaderName) + \'</b>\' + (t.leaderEmail ? \' <span class="small text-secondary">(\' + esc(t.leaderEmail) + \')</span>\' : \'\') + \'</li>\';' +
+  '  if(t.member2Name) memberList += \'<li class="list-group-item bg-transparent border-secondary text-white px-0">👤 \' + esc(t.member2Name) + (t.member2Email ? \' <span class="small text-secondary">(\' + esc(t.member2Email) + \')</span>\' : \'\') + \'</li>\';' +
+  '  if(t.member3Name) memberList += \'<li class="list-group-item bg-transparent border-secondary text-white px-0">👤 \' + esc(t.member3Name) + (t.member3Email ? \' <span class="small text-secondary">(\' + esc(t.member3Email) + \')</span>\' : \'\') + \'</li>\';' +
+  '  if(t.member4Name) memberList += \'<li class="list-group-item bg-transparent border-secondary text-white px-0">👤 \' + esc(t.member4Name) + (t.member4Email ? \' <span class="small text-secondary">(\' + esc(t.member4Email) + \')</span>\' : \'\') + \'</li>\';' +
+
+  '  p.innerHTML = ' +
+  '    \'<div class="card-box" style="border-left:4px solid #06B6D4;">\' +' +
+  '    \'<div class="d-flex justify-content-between align-items-center mb-1">\' +' +
+  '    \'<h4 class="text-white fw-bold mb-0">\' + esc(t.teamName) + \'</h4>\' +' +
+  '    \'<span class="badge bg-primary">\' + esc(t.teamId) + \'</span></div>\' +' +
+  '    \'<p class="small text-secondary mb-2">\' + esc(t.college||"") + \' • \' + esc(t.department||"") + \'</p>\' +' +
+  '    \'<div class="mb-2">\' + badge + \'</div>\' +' +
+  '    \'<div class="small text-secondary fw-bold text-uppercase mb-1">Registered Member Roster</div>\' +' +
+  '    \'<ul class="list-group list-group-flush">\' + memberList + \'</ul>\' +' +
+  '    \'</div>\' +' +
+  '    buildProjectSection(t, isAdmin) +' +
+  '    buildRoundsSection(t);' +
+  '}' +
+
+  'function buildProjectSection(t, isAdmin) {' +
+  '  var isSubmitted = (t.submissionLocked === true || t.submissionLocked === "true" || t.problemSubmitted === true || t.problemSubmitted === "true");' +
+  '  if (isSubmitted) {' +
+  '    return \'<div class="card-box" style="border-color:#10B981;">\' +' +
+  '      \'<div class="d-flex justify-content-between align-items-center mb-2">\' +' +
+  '      \'<h5 class="text-success fw-bold mb-0">🔒 Project Submission Locked</h5>\' +' +
+  '      \'<span class="badge bg-success">Submitted</span></div>\' +' +
+  '      \'<div class="mb-2"><span class="badge bg-info text-dark">\' + esc(t.domain||"") + \'</span></div>\' +' +
+  '      \'<p class="fw-bold text-white mb-1">\' + esc(t.projectTitle||"Pending") + \'</p>\' +' +
+  '      \'<p class="small text-secondary mb-2">\' + esc(t.problemStatement||"") + \'</p>\' +' +
+  '      \'<div class="alert py-2 small mb-0" style="background:#0F2744;border:1px solid #1E4976;color:#93C5FD;"><b>Locked:</b> Submission is permanently recorded in Google Cloud.</div>\' +' +
+  '      \'</div>\';' +
+  '  }' +
+  '  return \'<div class="card-box" id="subBox" style="border-color:#F59E0B;">\' +' +
+  '    \'<h5 class="text-warning fw-bold mb-1">🔓 One-Time Problem Statement Submission</h5>\' +' +
+  '    \'<p class="small text-secondary mb-3">Once submitted this <b>cannot be edited</b>. Ensure all details are correct before locking.</p>\' +' +
+  '    \'<form id="problemForm" onsubmit="handleCloudSubmit(event)">\' +' +
+  '    \'<label class="small text-secondary">Select Domain *</label>\' +' +
+  '    \'<select id="subDomain" required>\' +' +
+  '    \'<option value="">Select Domain...</option>\' +' +
+  '    \'<option>AI/ML</option><option>Cyber Security</option><option>Cloud &amp; DevOps</option>\' +' +
+  '    \'<option>Web Development</option><option>IoT &amp; Smart Hardware</option>\' +' +
+  '    \'<option>FinTech &amp; Open Banking</option><option>Healthcare &amp; Blockchain</option><option>Agriculture &amp; ML</option>\' +' +
+  '    \'</select>\' +' +
+  '    \'<label class="small text-secondary">Project Title *</label>\' +' +
+  '    \'<input type="text" id="subTitle" placeholder="e.g. Autonomous Vision Anomaly Detector" required>\' +' +
+  '    \'<label class="small text-secondary">Problem Statement / Summary *</label>\' +' +
+  '    \'<textarea id="subPS" rows="3" placeholder="Describe your problem approach..." required></textarea>\' +' +
+  '    \'<button type="submit" id="lockBtn" class="btn-primary-custom">🔒 Lock In Problem Statement</button>\' +' +
+  '    \'</form>\' +' +
+  '    \'<div id="submitStatus" class="mt-3"></div>\' +' +
+  '    \'</div>\';' +
+  '}' +
+
+  'function buildRoundsSection(t) {' +
+  '  return \'<div class="card-box">\' +' +
+  '    \'<h6 class="text-secondary text-uppercase small fw-bold mb-2">Jury Evaluation Rounds (200 Max Marks)</h6>\' +' +
+  '    \'<div class="row g-2 text-center">\' +' +
+  '    \'<div class="col-6"><div class="p-2 border border-secondary rounded"><div class="small fw-bold">Round 1 (100)</div><span class="badge bg-secondary">LOCKED</span></div></div>\' +' +
+  '    \'<div class="col-6"><div class="p-2 border border-secondary rounded"><div class="small fw-bold">Round 2 (100)</div><span class="badge bg-secondary">LOCKED</span></div></div>\' +' +
+  '    \'</div></div>\';' +
+  '}' +
+
   'function handleCloudSubmit(e) {' +
   '  e.preventDefault();' +
   '  var domain = document.getElementById("subDomain").value;' +
-  '  var projectTitle = document.getElementById("subTitle").value.trim();' +
-  '  var problemStatement = document.getElementById("subPS").value.trim();' +
+  '  var title = document.getElementById("subTitle").value.trim();' +
+  '  var ps = document.getElementById("subPS").value.trim();' +
   '  var btn = document.getElementById("lockBtn");' +
-  '  var statusBox = document.getElementById("submitStatus");' +
-  '  if (!confirm("Are you sure? Once submitted, your problem statement will be permanently locked for the team.")) return;' +
-  '  btn.disabled = true; btn.innerText = "Locking in Cloud Database...";' +
+  '  var status = document.getElementById("submitStatus");' +
+  '  if (!confirm("Are you sure? Your submission will be permanently locked and cannot be changed.")) return;' +
+  '  btn.disabled = true;' +
+  '  btn.innerHTML = \'<span class="spinner"></span>Locking in Cloud...\';' +
   '  google.script.run' +
-  '    .withSuccessHandler(function(res) {' +
-  '      statusBox.innerHTML = "<div class=\'alert alert-success\'>✓ Problem statement successfully locked in Google Cloud! Reloading...</div>";' +
-  '      setTimeout(function() { location.reload(); }, 1200);' +
+  '    .withSuccessHandler(function() {' +
+  '      status.innerHTML = \'<div class="alert alert-success">✓ Submission locked successfully! Refreshing...</div>\';' +
+  '      setTimeout(function(){location.reload();}, 1400);' +
   '    })' +
   '    .withFailureHandler(function(err) {' +
-  '      btn.disabled = false; btn.innerText = "🔒 Lock In Problem Statement";' +
-  '      statusBox.innerHTML = "<div class=\'alert alert-danger\'>" + (err.message || err) + "</div>";' +
+  '      btn.disabled = false;' +
+  '      btn.innerHTML = "🔒 Lock In Problem Statement";' +
+  '      status.innerHTML = \'<div class="alert alert-danger">\' + (err.message || err) + \'</div>\';' +
   '    })' +
-  '    .submitTeamProblemDetails(null, {' +
-  '      teamId: "' + team.teamId + '",' +
-  '      token: "' + team.qrCodeToken + '",' +
-  '      domain: domain,' +
-  '      projectTitle: projectTitle,' +
-  '      problemStatement: problemStatement' +
-  '    });' +
+  '    .submitTeamProblemDetailsVerified(teamData.teamId, teamData.qrCodeToken, verifiedEmail, domain, title, ps);' +
+  '}' +
+
+  'function esc(s) {' +
+  '  return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/\'/g,"&#039;");' +
   '}' +
   '</script>' +
   '</body></html>';
 
   return HtmlService.createHtmlOutput(html)
-    .setTitle("HackTrack Cloud Pass — " + safeTeamName)
+    .setTitle("Team Identity Verification — Synora'26")
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+/**
+ * submitTeamProblemDetailsVerified — server-side submission with ownership check.
+ * Called from the verified portal only, after email identity is confirmed.
+ */
+function submitTeamProblemDetailsVerified(teamId, token, verifiedEmail, domain, projectTitle, problemStatement) {
+  var ss = getSpreadsheet();
+  verifiedEmail = (verifiedEmail || "").trim().toLowerCase();
+
+  if (!verifiedEmail) throw new Error("AUTH_REQUIRED: Verified email is required to submit.");
+
+  // Re-validate ownership server-side (defense in depth — never trust client alone)
+  var teams = getTeams(ss);
+  var team = null;
+  for (var i = 0; i < teams.length; i++) {
+    if (teams[i].teamId === teamId || teams[i].qrCodeToken === token) {
+      team = teams[i];
+      break;
+    }
+  }
+  if (!team) throw new Error("TEAM_NOT_FOUND: Team not found.");
+
+  // Check ownership: must be admin, organizer, or a registered team member
+  var users = getSheetObjects(ss.getSheetByName(SHEETS.USERS));
+  var callerUser = null;
+  for (var u = 0; u < users.length; u++) {
+    if (String(users[u].Email || "").trim().toLowerCase() === verifiedEmail) {
+      callerUser = users[u];
+      break;
+    }
+  }
+
+  var isStaff = callerUser &&
+    (String(callerUser.Role).toLowerCase() === "admin" ||
+     String(callerUser.Role).toLowerCase() === "organizer");
+
+  var memberEmails = [
+    (team.leaderEmail || "").trim().toLowerCase(),
+    (team.member2Email || "").trim().toLowerCase(),
+    (team.member3Email || "").trim().toLowerCase(),
+    (team.member4Email || "").trim().toLowerCase()
+  ].filter(function(e) { return e !== ""; });
+
+  if (!isStaff && memberEmails.indexOf(verifiedEmail) === -1) {
+    logActivity(ss, verifiedEmail, verifiedEmail, "unknown", "IDOR Submission Attempt Blocked",
+      "Email " + verifiedEmail + " tried to submit for team " + teamId + " without membership.");
+    throw new Error("ACCESS_DENIED: You are not authorized to submit for this team.");
+  }
+
+  // Now call the standard submission function
+  return submitTeamProblemDetails(ss, {
+    teamId: teamId,
+    token: token,
+    domain: domain,
+    projectTitle: projectTitle,
+    problemStatement: problemStatement
+  });
 }
 
 /**
