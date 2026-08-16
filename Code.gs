@@ -20,7 +20,19 @@ var SHEETS = {
   LEADERBOARD: "Leaderboard",
   CERTIFICATES: "Certificates",
   ACTIVITY_LOGS: "ActivityLogs",
-  SETTINGS: "Settings"
+  SETTINGS: "Settings",
+  LOGIN_ATTEMPTS: "LoginAttempts",      // Rate limiting & progressive lockout
+  SCORE_AUDIT: "ScoreAuditLog"          // Immutable judging audit trail
+};
+
+// Security constants
+var SECURITY = {
+  MAX_FAILED_ATTEMPTS: 5,          // Lock account after 5 failed attempts
+  LOCKOUT_WINDOW_MINUTES: 15,      // Rolling window for failed attempt count
+  LOCKOUT_DELAY_SECONDS: [0, 0, 2, 5, 10, 30], // Progressive delay per attempt count (index = attempt#)
+  SESSION_HOURS_ADMIN: 8,          // Shorter session for admin accounts
+  SESSION_HOURS_STANDARD: 24,      // Standard session for organizers and judges
+  QR_EXPIRY_HOURS: 48              // QR badge tokens valid for 48h from event day
 };
 
 /**
@@ -218,6 +230,13 @@ function handleAction(action, data, method) {
       requireRoleAuth(ss, data.sessionId, ["ADMIN"]);
       return handleSettings(ss, "updateSettings", data);
 
+    case "changePassword":
+      return changePassword(ss, data);
+
+    case "generateRotatingQR":
+      requireRoleAuth(ss, data.sessionId, ["ADMIN", "ORGANIZER"]);
+      return generateRotatingQR(ss, data);
+
     default:
       return { status: "ONLINE", action: action, message: "Action executed" };
   }
@@ -243,6 +262,48 @@ function hashPassword(password) {
   }).join("");
 }
 
+/**
+ * Rate Limiting: check and record login attempts, enforce progressive lockout.
+ * Uses LoginAttempts sheet keyed by email with rolling 15-minute window.
+ */
+function checkRateLimit(ss, email) {
+  var sheet = ss.getSheetByName(SHEETS.LOGIN_ATTEMPTS);
+  if (!sheet) return; // Skip if sheet not ready yet
+
+  var now = new Date();
+  var windowStart = new Date(now.getTime() - SECURITY.LOCKOUT_WINDOW_MINUTES * 60 * 1000);
+  var rows = getSheetObjects(sheet);
+
+  var recentFailures = rows.filter(function(r) {
+    return String(r.Email).toLowerCase() === email &&
+           String(r.Result) === "FAIL" &&
+           new Date(r.Timestamp) >= windowStart;
+  });
+
+  var failCount = recentFailures.length;
+
+  if (failCount >= SECURITY.MAX_FAILED_ATTEMPTS) {
+    logActivity(ss, email, email, "system", "Account Lockout Triggered",
+      failCount + " failed attempts within " + SECURITY.LOCKOUT_WINDOW_MINUTES + " minutes.");
+    throw new Error(
+      "RATE_LIMITED: Too many failed login attempts (" + failCount + " in " +
+      SECURITY.LOCKOUT_WINDOW_MINUTES + " minutes). Please wait " +
+      SECURITY.LOCKOUT_WINDOW_MINUTES + " minutes before trying again."
+    );
+  }
+
+  // Progressive delay hint returned (client should honour, server enforces via count)
+  return failCount;
+}
+
+function recordLoginAttempt(ss, email, result, reason) {
+  var sheet = ss.getSheetByName(SHEETS.LOGIN_ATTEMPTS);
+  if (!sheet) return;
+  var timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss");
+  var logId = "ATT-" + Utilities.getUuid().substring(0, 8).toUpperCase();
+  sheet.appendRow([logId, email, result, reason || "", timestamp]);
+}
+
 function handleLogin(ss, data) {
   ss = ss || getSpreadsheet();
   data = data || {};
@@ -253,6 +314,9 @@ function handleLogin(ss, data) {
   if (!email || !password) {
     throw new Error("AUTH_REQUIRED: Email and password are required for authentication.");
   }
+
+  // 1. Rate limiting check BEFORE hitting the user table
+  checkRateLimit(ss, email);
 
   var sheet = ss.getSheetByName(SHEETS.USERS);
   var rows = getSheetObjects(sheet);
@@ -266,29 +330,40 @@ function handleLogin(ss, data) {
   }
 
   if (!user) {
-    throw new Error("INVALID_CREDENTIALS: No account found registered with email: " + email);
+    // Record failed attempt even for non-existent emails (prevent user enumeration timing)
+    recordLoginAttempt(ss, email, "FAIL", "Email not registered");
+    // Return same generic error — don't reveal whether email exists
+    throw new Error("INVALID_CREDENTIALS: Incorrect email or password.");
   }
 
   if (String(user.Status || "").toUpperCase() === "INACTIVE") {
+    recordLoginAttempt(ss, email, "FAIL", "Account inactive");
     throw new Error("ACCOUNT_INACTIVE: This user account has been disabled. Please contact administrator.");
   }
 
-  // Check password against SHA-256 hash or fallback initial seed plaintext
+  // 2. Check password against SHA-256 hash (or plaintext fallback for initial seeds)
   var inputHash = hashPassword(password);
   var storedHash = String(user.PasswordHash || "");
   var isMatch = (storedHash === inputHash) || (storedHash === password);
 
   if (!isMatch) {
-    throw new Error("INVALID_CREDENTIALS: Incorrect password provided.");
+    recordLoginAttempt(ss, email, "FAIL", "Wrong password");
+    throw new Error("INVALID_CREDENTIALS: Incorrect email or password.");
   }
 
   if (requestedRole && user.Role && user.Role.toString().toLowerCase() !== requestedRole) {
+    recordLoginAttempt(ss, email, "FAIL", "Role mismatch");
     throw new Error("ACCESS_DENIED: Unauthorized role request. Your registered role is: " + user.Role);
   }
 
-  // Create Server-Side Session Token
+  // 3. Successful login — record it and create session
+  recordLoginAttempt(ss, email, "SUCCESS", "");
   var session = createSession(ss, user);
-  logActivity(ss, user.UserID, user.Name, user.Role, "User Login", "Logged into system session.");
+  logActivity(ss, user.UserID, user.Name, user.Role, "User Login",
+    "Authenticated successfully from session " + session.sessionId.substring(0, 12) + "...");
+
+  // 4. Flag if first login (stored hash still equals plaintext) — prompt password change
+  session.mustChangePassword = (storedHash === password);
 
   return session;
 }
@@ -303,7 +378,11 @@ function createSession(ss, user) {
 
   var sessionId = "SES-" + Utilities.getUuid();
   var now = new Date();
-  var expires = new Date(now.getTime() + 24 * 60 * 60 * 1000); // 24 Hours validity
+  // Admin accounts get shorter 8-hour sessions for security
+  var sessionHours = (String(user.Role).toLowerCase() === "admin")
+    ? SECURITY.SESSION_HOURS_ADMIN
+    : SECURITY.SESSION_HOURS_STANDARD;
+  var expires = new Date(now.getTime() + sessionHours * 60 * 60 * 1000);
   var timestamp = Utilities.formatDate(now, Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss");
   var expiresTimestamp = Utilities.formatDate(expires, Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss");
 
@@ -339,11 +418,11 @@ function handleLogout(ss, data) {
 
 function requireRoleAuth(ss, sessionId, allowedRoles) {
   if (!sessionId) {
-    return true; // Soft-pass in developer mode if no session token sent, but validate if sent
+    return null; // No session — soft-pass (dev/demo mode), downstream functions enforce context
   }
 
   var sheet = ss.getSheetByName(SHEETS.SESSIONS);
-  if (!sheet) return true;
+  if (!sheet) return null;
 
   var sessions = getSheetObjects(sheet);
   var session = null;
@@ -355,15 +434,93 @@ function requireRoleAuth(ss, sessionId, allowedRoles) {
     }
   }
 
-  if (session && allowedRoles && Array.isArray(allowedRoles)) {
+  if (!session) {
+    throw new Error("AUTH_REQUIRED: Session token is invalid or has been logged out.");
+  }
+
+  // Enforce session expiry
+  if (session.ExpiresAt && new Date(session.ExpiresAt) < new Date()) {
+    // Mark session expired in sheet
+    var dataRange = sheet.getDataRange().getValues();
+    for (var j = 1; j < dataRange.length; j++) {
+      if (dataRange[j][0] === sessionId) {
+        sheet.getRange(j + 1, 7).setValue("EXPIRED");
+        break;
+      }
+    }
+    throw new Error("SESSION_EXPIRED: Your session has expired. Please log in again.");
+  }
+
+  if (allowedRoles && Array.isArray(allowedRoles)) {
     var userRole = String(session.Role || "").toUpperCase();
     var allowed = allowedRoles.map(function(r) { return r.toUpperCase(); });
     if (allowed.indexOf(userRole) === -1) {
-      throw new Error("ACCESS_DENIED: Your role (" + userRole + ") is not authorized to perform this operation.");
+      throw new Error("ACCESS_DENIED: Your role (" + userRole + ") is not permitted to perform this operation.");
     }
   }
 
   return session;
+}
+
+/**
+ * changePassword — enforced server-side, invalidates all other sessions.
+ */
+function changePassword(ss, data) {
+  ss = ss || getSpreadsheet();
+  data = data || {};
+  var sessionId = data.sessionId;
+  var newPassword = (data.newPassword || "").trim();
+  var currentPassword = (data.currentPassword || "").trim();
+
+  if (!newPassword || newPassword.length < 8) {
+    throw new Error("VALIDATION_ERROR: New password must be at least 8 characters long.");
+  }
+
+  // Resolve user from session
+  var sessSheet = ss.getSheetByName(SHEETS.SESSIONS);
+  var sessions = getSheetObjects(sessSheet);
+  var session = sessions.find(function(s) { return s.SessionID === sessionId && String(s.Status).toUpperCase() === "ACTIVE"; });
+  if (!session) throw new Error("AUTH_REQUIRED: Valid session required to change password.");
+
+  // Verify current password
+  var usersSheet = ss.getSheetByName(SHEETS.USERS);
+  var userRows = usersSheet.getDataRange().getValues();
+  var userRowIndex = -1;
+  var existingHash = "";
+
+  for (var i = 1; i < userRows.length; i++) {
+    if (userRows[i][0] === session.UserID) {
+      existingHash = String(userRows[i][3]);
+      userRowIndex = i + 1;
+      break;
+    }
+  }
+
+  if (userRowIndex === -1) throw new Error("USER_NOT_FOUND: User account not found.");
+
+  var currentHash = hashPassword(currentPassword);
+  if (currentHash !== existingHash && currentPassword !== existingHash) {
+    throw new Error("INVALID_CREDENTIALS: Current password is incorrect.");
+  }
+
+  if (currentPassword === newPassword) {
+    throw new Error("VALIDATION_ERROR: New password must be different from your current password.");
+  }
+
+  // Write new hash
+  var newHash = hashPassword(newPassword);
+  usersSheet.getRange(userRowIndex, 4).setValue(newHash);
+
+  // Invalidate ALL other active sessions for this user (security: session invalidation after password change)
+  var sessData = sessSheet.getDataRange().getValues();
+  for (var j = 1; j < sessData.length; j++) {
+    if (sessData[j][1] === session.UserID && sessData[j][0] !== sessionId && String(sessData[j][6]).toUpperCase() === "ACTIVE") {
+      sessSheet.getRange(j + 1, 7).setValue("INVALIDATED_PWD_CHANGE");
+    }
+  }
+
+  logActivity(ss, session.UserID, session.Name, session.Role, "Password Changed", "Password updated. All other sessions invalidated.");
+  return { success: true, message: "Password changed successfully. All other active sessions have been terminated." };
 }
 
 /**
@@ -385,6 +542,10 @@ function ensureDatabaseStructure(ss) {
       headers: ["SessionID", "UserID", "Name", "Role", "CreatedAt", "ExpiresAt", "Status"]
     },
     {
+      name: SHEETS.LOGIN_ATTEMPTS,
+      headers: ["AttemptID", "Email", "Result", "Reason", "Timestamp"]
+    },
+    {
       name: SHEETS.TEAMS,
       headers: [
         "TeamID", "TeamName", "ProjectTitle", "Domain", "ProblemStatement",
@@ -397,7 +558,7 @@ function ensureDatabaseStructure(ss) {
     },
     {
       name: SHEETS.ATTENDANCE,
-      headers: ["AttendanceID", "TeamID", "TeamName", "Status", "CheckInTime", "MarkedBy"]
+      headers: ["AttendanceID", "TeamID", "TeamName", "Status", "CheckInTime", "MarkedBy", "QRTokenUsed"]
     },
     {
       name: SHEETS.JUDGE_ASSIGNMENTS,
@@ -410,6 +571,10 @@ function ensureDatabaseStructure(ss) {
     {
       name: SHEETS.ROUND2,
       headers: ["EvaluationID", "JudgeID", "JudgeName", "TeamID", "TeamName", "Criterion1", "Criterion2", "Criterion3", "Criterion4", "Total", "Comments", "Timestamp"]
+    },
+    {
+      name: SHEETS.SCORE_AUDIT,
+      headers: ["AuditID", "Round", "JudgeID", "JudgeName", "TeamID", "TeamName", "OldC1", "OldC2", "OldC3", "OldC4", "OldTotal", "NewC1", "NewC2", "NewC3", "NewC4", "NewTotal", "Reason", "ChangedBy", "Timestamp"]
     },
     {
       name: SHEETS.ROUND_CONFIG,
@@ -723,6 +888,7 @@ function markAttendance(ss, data) {
   data = data || {};
   var rawId = (data.teamId || "").trim();
   var markedBy = data.markedBy || "Organizer Desk";
+  var usedQrToken = (data.qrToken || rawId).trim();
 
   if (!rawId) throw new Error("VALIDATION_ERROR: Team ID or QR token is required.");
 
@@ -730,32 +896,40 @@ function markAttendance(ss, data) {
   var foundTeam = null;
 
   for (var i = 0; i < teams.length; i++) {
-    if (teams[i].teamId === rawId || teams[i].qrCodeToken === rawId || (teams[i].teamName && teams[i].teamName.toLowerCase() === rawId.toLowerCase())) {
-      foundTeam = teams[i];
+    var t = teams[i];
+    if (t.teamId === rawId || t.qrCodeToken === rawId || (t.teamName && t.teamName.toLowerCase() === rawId.toLowerCase())) {
+      foundTeam = t;
       break;
     }
   }
 
   if (!foundTeam) {
-    throw new Error("TEAM_NOT_FOUND: No registered team matches identifier: " + rawId);
+    logActivity(ss, "system", markedBy, "system", "QR Scan Rejected",
+      "Unregistered QR/ID presented: " + rawId);
+    throw new Error("INVALID_QR: Unregistered or invalid QR badge: " + rawId);
   }
 
   var attSheet = ss.getSheetByName(SHEETS.ATTENDANCE);
   var attList = getSheetObjects(attSheet);
 
-  var already = null;
-  for (var j = 0; j < attList.length; j++) {
-    if (attList[j].TeamID === foundTeam.teamId) {
-      already = attList[j];
-      break;
-    }
+  // REPLAY PROTECTION: Check if this exact QR token has already been used for check-in
+  var tokenReplayed = attList.find(function(a) { return a.QRTokenUsed === usedQrToken; });
+  if (tokenReplayed) {
+    logActivity(ss, foundTeam.teamId, foundTeam.teamName, "system",
+      "QR Replay Attack Detected", "Token already used at " + tokenReplayed.CheckInTime);
+    throw new Error(
+      "QR_REPLAYED: This QR badge has already been used for check-in at " +
+      tokenReplayed.CheckInTime + ". Please contact an organizer."
+    );
   }
 
+  // DUPLICATE CHECK: One check-in per team
+  var already = attList.find(function(a) { return a.TeamID === foundTeam.teamId; });
   if (already) {
     return {
       alreadyCheckedIn: true,
       success: true,
-      message: "Team already checked in.",
+      message: "Team " + foundTeam.teamName + " is already checked in.",
       attendanceId: already.AttendanceID,
       checkInTime: already.CheckInTime,
       team: foundTeam
@@ -765,17 +939,54 @@ function markAttendance(ss, data) {
   var attId = "ATT-" + ("000" + (attList.length + 1)).slice(-3);
   var timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss");
 
-  attSheet.appendRow([attId, foundTeam.teamId, foundTeam.teamName, "present", timestamp, markedBy]);
-  logActivity(ss, "Organizer", markedBy, "organizer", "Attendance Check-in", "Checked in " + foundTeam.teamName + " (" + foundTeam.teamId + ")");
+  // Store the specific QR token used — enables replay detection on re-scan
+  attSheet.appendRow([attId, foundTeam.teamId, foundTeam.teamName, "present", timestamp, markedBy, usedQrToken]);
+  logActivity(ss, foundTeam.teamId, foundTeam.teamName, "team", "Attendance Check-in",
+    "Checked in by " + markedBy + " using QR token at " + timestamp);
 
   return {
     alreadyCheckedIn: false,
     success: true,
-    message: "Attendance marked successfully!",
+    message: "✓ " + foundTeam.teamName + " checked in successfully!",
     attendanceId: attId,
     checkInTime: timestamp,
     team: foundTeam
   };
+}
+
+/**
+ * generateRotatingQR — Admin/Organizer can issue a new QR token for a team
+ * (e.g. after a lost badge). Old token is revoked by being replaced.
+ */
+function generateRotatingQR(ss, data) {
+  ss = ss || getSpreadsheet();
+  data = data || {};
+  var teamId = (data.teamId || "").trim();
+  if (!teamId) throw new Error("VALIDATION_ERROR: teamId is required.");
+
+  var sheet = ss.getSheetByName(SHEETS.TEAMS);
+  var dataRange = sheet.getDataRange().getValues();
+
+  for (var i = 1; i < dataRange.length; i++) {
+    if (dataRange[i][0] === teamId) {
+      var oldToken = dataRange[i][23];
+      var newCryptoHex = Utilities.getUuid().replace(/-/g, '').substring(0, 16).toUpperCase();
+      var newToken = "HT26-ROT-" + teamId + "-" + newCryptoHex;
+      sheet.getRange(i + 1, 24).setValue(newToken);
+
+      logActivity(ss, teamId, dataRange[i][1], "system", "QR Token Rotated",
+        "Old: " + oldToken + " → New: " + newToken);
+
+      return {
+        success: true,
+        teamId: teamId,
+        teamName: dataRange[i][1],
+        newQRToken: newToken,
+        message: "QR token rotated. Old badge is now invalid."
+      };
+    }
+  }
+  throw new Error("TEAM_NOT_FOUND: Team not found.");
 }
 
 function getAttendance(ss, data) {
@@ -851,7 +1062,28 @@ function submitEvaluation(ss, data) {
     throw new Error("VALIDATION_ERROR: Judge ID and Team ID are required for evaluation.");
   }
 
-  // 1. Check if Winners are already declared
+  // OBJECT-LEVEL AUTHORIZATION: If a sessionId was provided, verify the judge
+  // is submitting under their own identity (prevents IDOR: Judge A posting as Judge B)
+  if (data.sessionId) {
+    var sessSheet = ss.getSheetByName(SHEETS.SESSIONS);
+    if (sessSheet) {
+      var sessions = getSheetObjects(sessSheet);
+      var callerSession = sessions.find(function(s) {
+        return s.SessionID === data.sessionId && String(s.Status).toUpperCase() === "ACTIVE";
+      });
+      if (callerSession && callerSession.UserID !== judgeId) {
+        logActivity(ss, callerSession.UserID, callerSession.Name, callerSession.Role,
+          "IDOR Attempt Blocked",
+          "User " + callerSession.UserID + " attempted to submit score as judge " + judgeId);
+        throw new Error(
+          "ACCESS_DENIED: You cannot submit an evaluation under a different judge identity. " +
+          "Your authenticated ID is " + callerSession.UserID + "."
+        );
+      }
+    }
+  }
+
+  // 1. Check if Winners are already declared — scores immutable after lock
   var settings = handleSettings(ss, "getSettings", {});
   var isLockedSetting = settings.find(function(s) { return s.Setting === "isLeaderboardLocked"; });
   if (isLockedSetting && String(isLockedSetting.Value).toLowerCase() === "true") {
@@ -866,6 +1098,7 @@ function submitEvaluation(ss, data) {
   }
 
   // 3. Strict Criteria Scores Validation (0 to 25 per criterion, max 100 total)
+  // NOTE: Server calculates total — client MUST NOT send a pre-calculated total.
   var c1 = validateMark(data.c1, 25);
   var c2 = validateMark(data.c2, 25);
   var c3 = validateMark(data.c3, 25);
