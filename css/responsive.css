@@ -1,0 +1,124 @@
+/* ==========================================================================
+   HackTrack | Synora'26 — Responsive & Mobile Drawer Layouts
+   ========================================================================== */
+
+/* Mobile Drawer Overlay */
+.ht-sidebar-overlay {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(2px);
+  z-index: 999;
+}
+
+/* Tablet & Mobile Breakpoints */
+@media (max-width: 992px) {
+  .ht-sidebar {
+    transform: translateX(-100%);
+  }
+
+  .ht-sidebar.open {
+    transform: translateX(0);
+  }
+
+  .ht-sidebar-overlay.open {
+    display: block;
+  }
+
+  .ht-main-content {
+    margin-left: 0;
+  }
+
+  .ht-mobile-toggle {
+    display: flex;
+  }
+
+  .ht-topbar {
+    padding: 0 1.25rem;
+  }
+
+  .ht-content-body {
+    padding: 1.25rem;
+  }
+
+  .podium-container {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+
+  .podium-card.gold {
+    order: 1;
+    transform: none;
+  }
+
+  .podium-card.silver {
+    order: 2;
+  }
+
+  .podium-card.bronze {
+    order: 3;
+  }
+
+  .ht-welcome-banner {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1rem;
+  }
+}
+
+@media (max-width: 768px) {
+  .ht-stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .table-filter-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .filter-group-left {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .user-info {
+    display: none;
+  }
+
+  .score-total-bar {
+    flex-direction: column;
+    gap: 0.5rem;
+    text-align: center;
+  }
+}
+
+/* Print Optimization for Reports and Certificates */
+@media print {
+  .ht-sidebar, .ht-topbar, .ht-sidebar-overlay, .btn-ht-primary, .btn-ht-outline, .table-filter-bar, .ht-logout-btn {
+    display: none !important;
+  }
+
+  .ht-main-content {
+    margin-left: 0 !important;
+    padding: 0 !important;
+    background: #FFFFFF !important;
+  }
+
+  .ht-content-body {
+    padding: 0 !important;
+  }
+
+  .ht-card, .ht-table-container {
+    box-shadow: none !important;
+    border: 1px solid #CCC !important;
+  }
+
+  body {
+    background: #FFFFFF !important;
+    color: #000000 !important;
+  }
+}

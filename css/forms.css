@@ -1,0 +1,215 @@
+/* ==========================================================================
+   HackTrack | Synora'26 — Forms & Evaluation Scoring Inputs
+   ========================================================================== */
+
+/* Form Group & Controls */
+.ht-form-group {
+  margin-bottom: 1.25rem;
+}
+
+.ht-label {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--ht-text-primary);
+  margin-bottom: 0.4rem;
+}
+
+.ht-label .required {
+  color: var(--ht-danger);
+  margin-left: 2px;
+}
+
+.ht-input, .ht-select, .ht-textarea {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  font-size: 0.92rem;
+  font-family: var(--ht-font-sans);
+  color: var(--ht-text-primary);
+  background-color: var(--ht-bg-card);
+  border: 1px solid var(--ht-border);
+  border-radius: var(--ht-radius-md);
+  outline: none;
+  transition: all 0.15s ease;
+}
+
+.ht-input:focus, .ht-select:focus, .ht-textarea:focus {
+  border-color: var(--ht-primary);
+  box-shadow: 0 0 0 3px var(--ht-primary-light);
+}
+
+.ht-input::placeholder, .ht-textarea::placeholder {
+  color: var(--ht-text-muted);
+}
+
+.ht-input:disabled, .ht-select:disabled, .ht-textarea:disabled {
+  background-color: var(--ht-bg-subtle);
+  color: var(--ht-text-muted);
+  cursor: not-allowed;
+}
+
+.ht-textarea {
+  resize: vertical;
+  min-height: 90px;
+}
+
+/* Custom Switch Toggle */
+.ht-switch {
+  position: relative;
+  display: inline-block;
+  width: 48px;
+  height: 26px;
+}
+
+.ht-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.ht-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: var(--ht-border);
+  transition: 0.3s;
+  border-radius: 26px;
+}
+
+.ht-slider:before {
+  position: absolute;
+  content: "";
+  height: 20px;
+  width: 20px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  transition: 0.3s;
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+input:checked + .ht-slider {
+  background-color: var(--ht-primary);
+}
+
+input:checked + .ht-slider:before {
+  transform: translateX(22px);
+}
+
+/* Multi-Criteria Evaluation Scoring Box */
+.scoring-criterion-card {
+  background-color: var(--ht-bg-card);
+  border: 1px solid var(--ht-border);
+  border-radius: var(--ht-radius-lg);
+  padding: 1.25rem;
+  margin-bottom: 1rem;
+  transition: border-color 0.2s ease;
+}
+
+.scoring-criterion-card:focus-within {
+  border-color: var(--ht-primary);
+}
+
+.criterion-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 0.75rem;
+}
+
+.criterion-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--ht-text-primary);
+}
+
+.criterion-desc {
+  font-size: 0.8rem;
+  color: var(--ht-text-secondary);
+  margin-top: 0.15rem;
+}
+
+.criterion-score-badge {
+  font-family: var(--ht-font-mono);
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: var(--ht-primary);
+  background-color: var(--ht-primary-light);
+  padding: 0.25rem 0.75rem;
+  border-radius: var(--ht-radius-md);
+  white-space: nowrap;
+}
+
+.score-slider-wrap {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 0.75rem;
+}
+
+.score-range-input {
+  flex-grow: 1;
+  accent-color: var(--ht-primary);
+  height: 6px;
+  cursor: pointer;
+}
+
+.score-number-input {
+  width: 70px;
+  text-align: center;
+  font-family: var(--ht-font-mono);
+  font-weight: 700;
+  font-size: 1rem;
+  padding: 0.4rem 0.5rem;
+}
+
+/* Total Score Summary Box */
+.score-total-bar {
+  background: linear-gradient(135deg, #1E293B, #0F172A);
+  color: #FFFFFF;
+  border-radius: var(--ht-radius-lg);
+  padding: 1.25rem 1.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 1.5rem;
+  box-shadow: var(--ht-shadow-md);
+}
+
+.score-total-label {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #94A3B8;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.score-total-display {
+  font-size: 2.2rem;
+  font-weight: 800;
+  font-family: var(--ht-font-mono);
+  color: #38BDF8;
+}
+
+/* Member Details Form Card */
+.member-section-card {
+  background-color: var(--ht-bg-subtle);
+  border: 1px solid var(--ht-border);
+  border-radius: var(--ht-radius-lg);
+  padding: 1.25rem;
+  margin-bottom: 1.25rem;
+}
+
+.member-section-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--ht-text-primary);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}

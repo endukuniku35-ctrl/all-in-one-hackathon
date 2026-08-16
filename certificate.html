@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Official Certificate — HackTrack | Synora'26</title>
+  
+  <!-- CSS Dependencies -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/dashboard.css">
+  <link rel="stylesheet" href="css/responsive.css">
+
+  <style>
+    body {
+      background: #0B132B;
+      color: #E2E8F0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .cert-container {
+      max-width: 960px;
+      margin: 30px auto;
+      padding: 0 15px;
+    }
+
+    /* Official Printable Landscape Certificate Frame */
+    .certificate-frame {
+      background: #FFFFFF;
+      color: #0F172A;
+      border: 12px double #1E3A8A;
+      border-radius: 12px;
+      padding: 45px 50px;
+      position: relative;
+      box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+      background-image: radial-gradient(circle at center, #FFFFFF 0%, #F8FAFC 100%);
+    }
+
+    .cert-corner-decor {
+      position: absolute;
+      width: 40px;
+      height: 40px;
+      border-color: #3B82F6;
+    }
+    .cert-tl { top: 10px; left: 10px; border-top: 3px solid #1E3A8A; border-left: 3px solid #1E3A8A; }
+    .cert-tr { top: 10px; right: 10px; border-top: 3px solid #1E3A8A; border-right: 3px solid #1E3A8A; }
+    .cert-bl { bottom: 10px; left: 10px; border-bottom: 3px solid #1E3A8A; border-left: 3px solid #1E3A8A; }
+    .cert-br { bottom: 10px; right: 10px; border-bottom: 3px solid #1E3A8A; border-right: 3px solid #1E3A8A; }
+
+    .cert-header {
+      text-align: center;
+      margin-bottom: 25px;
+    }
+
+    .cert-logo {
+      font-size: 2.2rem;
+      color: #1E3A8A;
+      margin-bottom: 5px;
+    }
+
+    .cert-title {
+      font-family: 'Cinzel', 'Georgia', serif;
+      font-size: 2rem;
+      font-weight: 800;
+      letter-spacing: 4px;
+      color: #0F172A;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+
+    .cert-subtitle {
+      font-size: 0.95rem;
+      letter-spacing: 2px;
+      color: #475569;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+
+    .cert-body {
+      text-align: center;
+      margin: 30px 0;
+    }
+
+    .cert-presents {
+      font-style: italic;
+      color: #64748B;
+      font-size: 1.05rem;
+      margin-bottom: 12px;
+    }
+
+    .cert-recipient {
+      font-family: 'Cinzel', 'Georgia', serif;
+      font-size: 2.4rem;
+      font-weight: 900;
+      color: #1E3A8A;
+      border-bottom: 2px solid #CBD5E1;
+      display: inline-block;
+      padding: 0 40px 6px 40px;
+      margin-bottom: 16px;
+    }
+
+    .cert-text {
+      font-size: 1.05rem;
+      line-height: 1.7;
+      color: #334155;
+      max-width: 760px;
+      margin: 0 auto 20px auto;
+    }
+
+    .cert-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      margin-top: 40px;
+      padding-top: 20px;
+      border-top: 1px dashed #CBD5E1;
+    }
+
+    .sig-block {
+      text-align: center;
+      width: 220px;
+    }
+
+    .sig-line {
+      border-top: 1.5px solid #0F172A;
+      margin-top: 40px;
+      padding-top: 6px;
+      font-weight: 700;
+      font-size: 0.9rem;
+      color: #0F172A;
+    }
+
+    .sig-title {
+      font-size: 0.75rem;
+      color: #64748B;
+    }
+
+    .cert-verification-qr {
+      text-align: center;
+    }
+
+    .cert-id-tag {
+      font-family: monospace;
+      font-size: 0.75rem;
+      color: #64748B;
+      margin-top: 4px;
+    }
+
+    @media print {
+      body {
+        background: #FFFFFF !important;
+        padding: 0 !important;
+      }
+      .no-print {
+        display: none !important;
+      }
+      .cert-container {
+        max-width: 100% !important;
+        margin: 0 !important;
+        padding: 0 !important;
+      }
+      .certificate-frame {
+        box-shadow: none !important;
+        border: 8px double #1E3A8A !important;
+        page-break-inside: avoid;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="cert-container">
+
+    <!-- Top Action Controls (Hidden when printing) -->
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2 no-print">
+      <a href="javascript:history.back()" class="btn btn-outline-light btn-sm">
+        <i class="bi bi-arrow-left"></i> Back to Pass
+      </a>
+      <div class="d-flex gap-2">
+        <button class="btn btn-primary btn-sm" onclick="window.print()">
+          <i class="bi bi-printer-fill"></i> Print / Save as PDF
+        </button>
+        <button class="btn btn-outline-info btn-sm" onclick="copyCertLink()">
+          <i class="bi bi-share-fill"></i> Copy Verification Link
+        </button>
+      </div>
+    </div>
+
+    <!-- Official Certificate Frame -->
+    <div class="certificate-frame" id="certificateNode">
+      <div class="cert-corner-decor cert-tl"></div>
+      <div class="cert-corner-decor cert-tr"></div>
+      <div class="cert-corner-decor cert-bl"></div>
+      <div class="cert-corner-decor cert-br"></div>
+
+      <div class="cert-header">
+        <div class="cert-logo"><i class="bi bi-award-fill text-primary"></i></div>
+        <div class="cert-title">Certificate of Achievement</div>
+        <div class="cert-subtitle">Synora'26 Flagship National Hackathon</div>
+      </div>
+
+      <div class="cert-body">
+        <div class="cert-presents">This official credential is proudly conferred upon</div>
+        <div class="cert-recipient" id="certRecipientName">Participant Name</div>
+        
+        <p class="cert-text">
+          for active participation and outstanding engineering contribution as <b id="certRole">Team Member</b> in team <b id="certTeamName" class="text-primary">Team Name</b> representing <b id="certCollege">Institution</b> with project <i id="certProject">Project Name</i> at Synora'26.
+        </p>
+      </div>
+
+      <div class="cert-footer">
+        <div class="sig-block">
+          <div class="sig-line" id="certSignatory">Dr. Rachel Adams</div>
+          <div class="sig-title">Convener &amp; Program Director, Synora'26</div>
+        </div>
+
+        <div class="cert-verification-qr">
+          <div id="certQrCodeCanvas" style="display:inline-block;"></div>
+          <div class="cert-id-tag" id="certVerificationId">CERT-HT-2026-0001</div>
+          <div class="badge bg-success text-white" style="font-size:0.65rem;">✓ Cryptographically Verified</div>
+        </div>
+
+        <div class="sig-block">
+          <div class="sig-line" id="certDate">August 16, 2026</div>
+          <div class="sig-title">Council of Innovation &amp; Technology</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Scripts -->
+  <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/demo-data.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/utils.js"></script>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', async () => {
+      const params = new URLSearchParams(window.location.search);
+      const teamId = params.get('teamId') || 'HT2026001';
+      const participantName = params.get('name') || '';
+      const role = params.get('role') || 'Team Member';
+      const certId = params.get('certId') || `CERT-HT-2026-${teamId.replace('HT', '')}`;
+
+      try {
+        const team = await API.request('getTeam', { teamId });
+        const name = participantName || team.leaderName;
+
+        document.getElementById('certRecipientName').textContent = name;
+        document.getElementById('certRole').textContent = role;
+        document.getElementById('certTeamName').textContent = team.teamName;
+        document.getElementById('certCollege').textContent = `${team.college} (${team.department})`;
+        document.getElementById('certProject').textContent = `"${team.projectTitle || 'Autonomous Innovation System'}"`;
+        document.getElementById('certVerificationId').textContent = certId;
+
+        // Render Verification QR Code on certificate
+        const verifyUrl = window.location.href;
+        Utils.renderQrCode('certQrCodeCanvas', verifyUrl, 75, 75);
+      } catch (err) {
+        console.error(err);
+      }
+    });
+
+    function copyCertLink() {
+      navigator.clipboard.writeText(window.location.href).then(() => {
+        alert("✓ Certificate verification link copied to clipboard!");
+      });
+    }
+  </script>
+</body>
+</html>

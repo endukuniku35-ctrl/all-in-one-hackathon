@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Certificate Management — HackTrack | Synora'26</title>
+  
+  <!-- CSS Dependencies -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+  <link rel="stylesheet" href="../css/style.css">
+  <link rel="stylesheet" href="../css/dashboard.css">
+  <link rel="stylesheet" href="../css/forms.css">
+  <link rel="stylesheet" href="../css/tables.css">
+  <link rel="stylesheet" href="../css/responsive.css">
+</head>
+<body>
+
+  <div class="ht-sidebar-overlay" onclick="Utils.closeSidebar()"></div>
+
+  <div class="ht-app-wrapper">
+
+    <!-- Admin Sidebar -->
+    <aside class="ht-sidebar">
+      <div class="ht-sidebar-brand">
+        <div class="brand-icon">⚙</div>
+        <div>
+          <div>HackTrack</div>
+          <span class="brand-sub">Synora'26 Admin</span>
+        </div>
+      </div>
+
+      <nav class="ht-sidebar-nav">
+        <!-- OVERVIEW -->
+        <div>
+          <div class="ht-nav-group-title">OVERVIEW</div>
+          <ul class="ht-nav-list">
+            <li>
+              <a href="dashboard.html" class="ht-nav-link">
+                <i class="bi bi-speedometer2"></i> Dashboard
+              </a>
+            </li>
+          </ul>
+        </div>
+
+        <!-- MANAGEMENT -->
+        <div>
+          <div class="ht-nav-group-title">MANAGEMENT</div>
+          <ul class="ht-nav-list">
+            <li>
+              <a href="users.html" class="ht-nav-link">
+                <i class="bi bi-people-fill"></i> User Accounts
+              </a>
+            </li>
+            <li>
+              <a href="teams.html" class="ht-nav-link">
+                <i class="bi bi-diagram-3-fill"></i> Teams
+              </a>
+            </li>
+            <li>
+              <a href="attendance.html" class="ht-nav-link">
+                <i class="bi bi-qr-code-scan"></i> Attendance
+              </a>
+            </li>
+          </ul>
+        </div>
+
+        <!-- JUDGING -->
+        <div>
+          <div class="ht-nav-group-title">JUDGING</div>
+          <ul class="ht-nav-list">
+            <li>
+              <a href="leaderboard.html" class="ht-nav-link">
+                <i class="bi bi-trophy-fill"></i> Leaderboard
+              </a>
+            </li>
+          </ul>
+        </div>
+
+        <!-- OUTPUT -->
+        <div>
+          <div class="ht-nav-group-title">OUTPUT</div>
+          <ul class="ht-nav-list">
+            <li>
+              <a href="certificates.html" class="ht-nav-link active">
+                <i class="bi bi-award-fill"></i> Certificates
+              </a>
+            </li>
+          </ul>
+        </div>
+
+        <!-- SYSTEM -->
+        <div>
+          <div class="ht-nav-group-title">SYSTEM</div>
+          <ul class="ht-nav-list">
+            <li>
+              <a href="activity-logs.html" class="ht-nav-link">
+                <i class="bi bi-journal-text"></i> Activity Logs
+              </a>
+            </li>
+          </ul>
+        </div>
+      </nav>
+
+      <div class="ht-sidebar-footer">
+        <button class="ht-logout-btn" onclick="Auth.logout()">
+          <i class="bi bi-box-arrow-right"></i> Logout
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="ht-main-content">
+      
+      <!-- Topbar Header -->
+      <header class="ht-topbar">
+        <div class="ht-topbar-left">
+          <button class="ht-mobile-toggle" onclick="Utils.toggleSidebar()">
+            <i class="bi bi-list"></i>
+          </button>
+          <div class="ht-page-heading">
+            <i class="bi bi-award-fill text-primary"></i> Digital Certificate Engine
+          </div>
+        </div>
+
+        <div class="ht-topbar-right">
+          <button class="theme-toggle-btn" onclick="Utils.toggleTheme()" title="Toggle Dark/Light Mode">
+            <i class="bi bi-moon-stars-fill" id="theme-toggle-icon"></i>
+          </button>
+
+          <div class="user-profile-widget">
+            <div class="user-avatar" id="topbar-user-avatar">AD</div>
+            <div class="user-info">
+              <span class="user-name" id="topbar-user-name">Super Administrator</span>
+              <span class="user-role-tag" id="topbar-user-role">ADMIN</span>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <!-- Content Body -->
+      <div class="ht-content-body">
+        
+        <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+          <div>
+            <h3 class="fw-bold mb-1">Certificate System Control</h3>
+            <p class="text-muted small mb-0">Automated multi-participant certificate rendering, asset templating and batch delivery.</p>
+          </div>
+
+          <div class="d-flex gap-2 flex-wrap">
+            <button class="btn-ht-primary" onclick="Certificates.releaseAllCertificates()">
+              <i class="bi bi-check2-circle"></i> Approve &amp; Release All
+            </button>
+            <button class="btn-ht-outline" onclick="Utils.exportToCsv('Synora26_Certificate_Registry.csv', Certificates.certs)">
+              <i class="bi bi-download"></i> Export Registry (CSV)
+            </button>
+          </div>
+        </div>
+
+        <!-- System Configuration & Assets -->
+        <div class="row g-4 mb-4">
+          <div class="col-lg-6">
+            <div class="ht-card h-100">
+              <div class="ht-card-header">
+                <div class="ht-card-title">
+                  <i class="bi bi-sliders text-primary"></i> Certificate Template Assets
+                </div>
+                <span class="ht-badge badge-active">Active Template</span>
+              </div>
+
+              <div class="ht-form-group">
+                <label class="ht-label">Event Headline</label>
+                <input type="text" class="ht-input" value="SYNORA'26 NATIONAL FLAGSHIP HACKATHON" readonly>
+              </div>
+
+              <div class="ht-form-group">
+                <label class="ht-label">Authorized Signatory Name</label>
+                <input type="text" class="ht-input" value="Dr. Rachel Adams (Chief Convener &amp; Jury Chair)" id="certSignatoryInput">
+              </div>
+
+              <button class="btn-ht-primary mt-2" id="saveCertAssetsBtn">
+                <i class="bi bi-save"></i> Save &amp; Apply Assets
+              </button>
+            </div>
+          </div>
+
+          <div class="col-lg-6">
+            <div class="ht-card h-100">
+              <div class="ht-card-header">
+                <div class="ht-card-title">
+                  <i class="bi bi-cloud-arrow-up-fill text-info"></i> Batch Operations &amp; SMTP
+                </div>
+                <span class="small text-muted">Automations</span>
+              </div>
+
+              <p class="small text-muted mb-3">
+                Configure automated certificate generation across all 56 participants with unique verification hash tokens.
+              </p>
+
+              <div class="d-grid gap-2">
+                <button class="btn btn-outline-primary text-start p-2" onclick="Certificates.loadData(); Utils.showToast('Certificates refreshed from data store.', 'info');">
+                  <i class="bi bi-arrow-repeat me-2"></i> <b>Regenerate Certificate Canvas Cache</b>
+                </button>
+                <button class="btn btn-outline-secondary text-start p-2" onclick="Utils.showToast('SMTP Mail Dispatcher connected. Ready for participant notifications.', 'success')">
+                  <i class="bi bi-envelope-check me-2"></i> <b>Setup Live Email (SMTP) Dispatcher</b>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Team Certificate Roster Table -->
+        <div class="ht-card">
+          <div class="ht-card-header">
+            <div class="ht-card-title">
+              <i class="bi bi-award text-warning"></i> Team Participant Certificates
+            </div>
+            <span class="small text-muted">Preview &amp; Download</span>
+          </div>
+
+          <div class="table-responsive">
+            <table class="ht-table">
+              <thead>
+                <tr>
+                  <th>Team &amp; Project</th>
+                  <th>College</th>
+                  <th>Registered Members</th>
+                  <th>Status</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="certificatesTableBody">
+                <!-- Dynamically Rendered -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+    </main>
+
+  </div>
+
+  <!-- Certificate Canvas Modal -->
+  <div class="ht-modal-backdrop" id="viewCertModal">
+    <div class="ht-modal-dialog" style="max-width: 920px;">
+      <div class="ht-modal-header">
+        <div>
+          <h5 class="ht-modal-title"><i class="bi bi-award-fill text-warning"></i> Certificate Preview</h5>
+          <span class="small text-muted" id="certModalId">CERT-HT-2026-0001</span> • <span class="fw-bold" id="certModalName">Participant</span>
+        </div>
+        <button class="btn-modal-close" onclick="Utils.closeModal('viewCertModal')">
+          <i class="bi bi-x-lg"></i>
+        </button>
+      </div>
+      <div class="ht-modal-body text-center p-3">
+        <canvas id="certCanvas" style="max-width: 100%; height: auto; border: 1px solid var(--ht-border); border-radius: var(--ht-radius-md); box-shadow: var(--ht-shadow-md);"></canvas>
+      </div>
+      <div class="ht-modal-footer">
+        <button type="button" class="btn-ht-outline" onclick="window.print()"><i class="bi bi-printer"></i> Print PDF</button>
+        <button type="button" class="btn-ht-primary" onclick="Certificates.downloadCurrentCertificate()"><i class="bi bi-download"></i> Download PNG</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="../js/config.js"></script>
+  <script src="../js/demo-data.js"></script>
+  <script src="../js/api.js"></script>
+  <script src="../js/utils.js"></script>
+  <script src="../js/auth.js"></script>
+  <script src="../js/certificates.js"></script>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      Certificates.init();
+    });
+  </script>
+</body>
+</html>

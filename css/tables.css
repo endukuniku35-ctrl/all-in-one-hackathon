@@ -1,0 +1,307 @@
+/* ==========================================================================
+   HackTrack | Synora'26 — Enterprise Tables, Filters & Modals
+   ========================================================================== */
+
+/* Search & Filter Bar */
+.table-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.filter-group-left {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  flex-grow: 1;
+}
+
+.table-search-input {
+  position: relative;
+  min-width: 260px;
+  flex-grow: 1;
+}
+
+.table-search-input i {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--ht-text-muted);
+  font-size: 0.95rem;
+}
+
+.table-search-input input {
+  width: 100%;
+  padding: 0.65rem 1rem 0.65rem 2.25rem;
+  font-size: 0.88rem;
+  border-radius: var(--ht-radius-md);
+  border: 1px solid var(--ht-border);
+  background-color: var(--ht-bg-card);
+  color: var(--ht-text-primary);
+  outline: none;
+}
+
+.table-search-input input:focus {
+  border-color: var(--ht-primary);
+  box-shadow: 0 0 0 3px var(--ht-primary-light);
+}
+
+.filter-select {
+  padding: 0.65rem 1rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  border-radius: var(--ht-radius-md);
+  border: 1px solid var(--ht-border);
+  background-color: var(--ht-bg-card);
+  color: var(--ht-text-primary);
+  outline: none;
+  cursor: pointer;
+}
+
+/* Table Container & Table */
+.ht-table-container {
+  background-color: var(--ht-bg-card);
+  border: 1px solid var(--ht-border);
+  border-radius: var(--ht-radius-lg);
+  box-shadow: var(--ht-shadow-xs);
+  overflow-x: auto;
+  margin-bottom: 1.5rem;
+}
+
+.ht-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 0.88rem;
+}
+
+.ht-table thead {
+  background-color: var(--ht-bg-subtle);
+  border-bottom: 2px solid var(--ht-border);
+}
+
+.ht-table th {
+  padding: 0.9rem 1.25rem;
+  font-weight: 700;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ht-text-muted);
+  white-space: nowrap;
+}
+
+.ht-table td {
+  padding: 1rem 1.25rem;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--ht-border-subtle);
+  color: var(--ht-text-primary);
+}
+
+.ht-table tbody tr {
+  transition: background-color 0.15s ease;
+}
+
+.ht-table tbody tr:hover {
+  background-color: var(--ht-bg-subtle);
+}
+
+/* Team Row Elements */
+.team-id-badge {
+  font-family: var(--ht-font-mono);
+  font-weight: 700;
+  font-size: 0.8rem;
+  padding: 0.2rem 0.5rem;
+  background-color: var(--ht-bg-subtle);
+  border: 1px solid var(--ht-border);
+  border-radius: var(--ht-radius-sm);
+  color: var(--ht-primary);
+}
+
+.team-title-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.team-name-text {
+  font-weight: 700;
+  color: var(--ht-text-primary);
+}
+
+.project-title-sub {
+  font-size: 0.78rem;
+  color: var(--ht-text-secondary);
+  max-width: 320px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.contact-cell {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.82rem;
+}
+
+.contact-name {
+  font-weight: 600;
+  color: var(--ht-text-primary);
+}
+
+.contact-sub {
+  font-size: 0.75rem;
+  color: var(--ht-text-muted);
+}
+
+/* Action Button Groups */
+.table-actions-group {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.btn-table-action {
+  padding: 0.35rem 0.65rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  border-radius: var(--ht-radius-sm);
+  border: 1px solid var(--ht-border);
+  background-color: var(--ht-bg-card);
+  color: var(--ht-text-primary);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-table-action:hover {
+  background-color: var(--ht-bg-subtle);
+  border-color: var(--ht-text-muted);
+}
+
+.btn-table-action.btn-action-primary:hover {
+  background-color: var(--ht-primary);
+  color: #FFFFFF;
+  border-color: var(--ht-primary);
+}
+
+.btn-table-action.btn-action-danger:hover {
+  background-color: var(--ht-danger);
+  color: #FFFFFF;
+  border-color: var(--ht-danger);
+}
+
+/* Score Matrix Styling */
+.score-cell-value {
+  font-family: var(--ht-font-mono);
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+.grand-total-highlight {
+  font-family: var(--ht-font-mono);
+  font-weight: 800;
+  font-size: 1.05rem;
+  color: var(--ht-primary);
+}
+
+/* Modals */
+.ht-modal-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(4px);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  opacity: 0;
+  visibility: hidden;
+  transition: all 0.25s ease;
+}
+
+.ht-modal-backdrop.active {
+  opacity: 1;
+  visibility: visible;
+}
+
+.ht-modal-dialog {
+  background-color: var(--ht-bg-card);
+  border: 1px solid var(--ht-border);
+  border-radius: var(--ht-radius-xl);
+  width: 100%;
+  max-width: 580px;
+  box-shadow: var(--ht-shadow-xl);
+  transform: translateY(20px) scale(0.97);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow: hidden;
+}
+
+.ht-modal-backdrop.active .ht-modal-dialog {
+  transform: translateY(0) scale(1);
+}
+
+.ht-modal-header {
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid var(--ht-border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ht-modal-title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--ht-text-primary);
+}
+
+.btn-modal-close {
+  background: transparent;
+  border: none;
+  font-size: 1.25rem;
+  color: var(--ht-text-muted);
+  cursor: pointer;
+}
+
+.btn-modal-close:hover {
+  color: var(--ht-text-primary);
+}
+
+.ht-modal-body {
+  padding: 1.5rem;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.ht-modal-footer {
+  padding: 1.25rem 1.5rem;
+  border-top: 1px solid var(--ht-border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  background-color: var(--ht-bg-subtle);
+}
+
+/* QR Code Preview Box */
+.qr-modal-preview {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background-color: #FFFFFF;
+  border-radius: var(--ht-radius-lg);
+  border: 2px dashed var(--ht-border);
+  margin-bottom: 1rem;
+}

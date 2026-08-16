@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HackTrack | Synora'26 — Complete Hackathon Management Platform</title>
+  
+  <!-- CSS Dependencies -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/dashboard.css">
+  <link rel="stylesheet" href="css/tables.css">
+  <link rel="stylesheet" href="css/responsive.css">
+</head>
+<body class="bg-main">
+
+  <!-- Landing Header -->
+  <header class="py-3 border-bottom bg-card shadow-xs">
+    <div class="container d-flex justify-content-between align-items-center">
+      <div class="d-flex align-items-center gap-2">
+        <div class="brand-icon" style="width:38px; height:38px; background:linear-gradient(135deg, #2563EB, #06B6D4); border-radius:8px; display:flex; align-items:center; justify-content:center; color:#fff; font-weight:bold;">
+          ⚙
+        </div>
+        <div>
+          <span class="fw-bold fs-5 text-primary">HackTrack</span>
+          <span class="badge bg-primary ms-1">Synora'26</span>
+        </div>
+      </div>
+      <div class="d-flex align-items-center gap-3">
+        <button class="theme-toggle-btn" onclick="Utils.toggleTheme()" title="Toggle Dark/Light Mode">
+          <i class="bi bi-moon-stars-fill" id="theme-toggle-icon"></i>
+        </button>
+        <a href="admin/leaderboard.html" class="btn-ht-outline d-none d-sm-inline-flex">
+          <i class="bi bi-trophy-fill text-warning"></i> Live Leaderboard (200 Max)
+        </a>
+        <a href="login.html" class="btn-ht-primary">
+          <i class="bi bi-box-arrow-in-right"></i> Launch Portal
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Hero Section -->
+  <section class="py-5 text-center">
+    <div class="container py-4">
+      <div class="d-inline-flex align-items-center gap-2 px-3 py-1 mb-4 rounded-pill border bg-card shadow-xs">
+        <span class="live-indicator"><span class="pulse-dot"></span> 2-ROUND EVALUATION ENGINE</span>
+        <span class="small text-secondary fw-semibold">National Flagship Hackathon • Synora'26</span>
+      </div>
+      <h1 class="display-4 fw-extrabold mb-3">Enterprise Hackathon Operations &amp; Judging Suite</h1>
+      <p class="lead text-secondary mx-auto mb-4" style="max-width: 740px;">
+        A high-performance management platform for <b>Synora'26</b> featuring organizer-only team onboarding, cryptographic dynamic QR passes with one-time problem statement submission, 2-round multi-judge scoring (100 marks each, 200 total), and real-time podium standings.
+      </p>
+
+      <div class="d-flex justify-content-center gap-3 flex-wrap">
+        <a href="login.html" class="btn-ht-primary fs-6 px-4 py-2">
+          <i class="bi bi-shield-lock-fill"></i> Access Role Portals
+        </a>
+        <a href="team-portal.html?teamId=HT2026001" class="btn-ht-outline fs-6 px-4 py-2">
+          <i class="bi bi-qr-code-scan text-primary"></i> Preview Team QR Portal
+        </a>
+        <a href="admin/leaderboard.html" class="btn-ht-outline fs-6 px-4 py-2">
+          <i class="bi bi-trophy-fill text-warning"></i> View Standings &amp; Podium
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- Stats Strip -->
+  <section class="container mb-5">
+    <div class="ht-stats-grid">
+      <div class="stat-card">
+        <div class="stat-info-wrap">
+          <div class="stat-label">Registered Teams</div>
+          <div class="stat-value" id="landing-teams">10</div>
+          <div class="stat-sub">Across 10 Innovation Domains</div>
+        </div>
+        <div class="stat-icon-wrap"><i class="bi bi-people-fill"></i></div>
+      </div>
+      <div class="stat-card stat-success">
+        <div class="stat-info-wrap">
+          <div class="stat-label">Total Participants</div>
+          <div class="stat-value" id="landing-participants">35</div>
+          <div class="stat-sub">Validated Student Innovators</div>
+        </div>
+        <div class="stat-icon-wrap"><i class="bi bi-person-badge-fill"></i></div>
+      </div>
+      <div class="stat-card stat-info">
+        <div class="stat-info-wrap">
+          <div class="stat-label">Jury Evaluation</div>
+          <div class="stat-value">2 Rounds</div>
+          <div class="stat-sub">200 Grand Total Max Marks (100+100)</div>
+        </div>
+        <div class="stat-icon-wrap"><i class="bi bi-clipboard2-check-fill"></i></div>
+      </div>
+      <div class="stat-card stat-warning">
+        <div class="stat-info-wrap">
+          <div class="stat-label">Attendance Rate</div>
+          <div class="stat-value" id="landing-attendance">100%</div>
+          <div class="stat-sub">Instant QR Token Verification</div>
+        </div>
+        <div class="stat-icon-wrap"><i class="bi bi-qr-code-scan"></i></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Participant Certificate Search Portal -->
+  <section class="container mb-5">
+    <div class="ht-card p-4 border-success">
+      <div class="ht-card-header">
+        <div>
+          <div class="ht-card-title text-success">
+            <i class="bi bi-award-fill text-success"></i> Participant Certificate Portal
+          </div>
+          <p class="small text-muted mb-0">Search and download official verified participation &amp; merit certificates once released by administrators.</p>
+        </div>
+        <span class="ht-badge badge-active"><i class="bi bi-shield-check"></i> Official Registry</span>
+      </div>
+
+      <div class="p-3">
+        <form id="landingCertSearchForm" class="row g-3 align-items-center">
+          <div class="col-md-9">
+            <div class="input-group">
+              <span class="input-group-text bg-subtle border"><i class="bi bi-search"></i></span>
+              <input type="text" id="landingCertSearchInput" class="ht-input" placeholder="Enter your Team ID (e.g. HT2026001), Leader Email, or Team Name..." required>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <button type="submit" class="btn btn-success w-100 py-2 fw-bold" style="background:#10B981; border:none;">
+              <i class="bi bi-download"></i> Find Certificates
+            </button>
+          </div>
+        </form>
+
+        <div id="landingCertResultBox" class="mt-4" style="display:none;"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Role Launchpad -->
+  <section class="container mb-5">
+    <div class="ht-card p-4">
+      <div class="ht-card-header">
+        <div class="ht-card-title">
+          <i class="bi bi-grid-fill text-primary"></i> Quick Access Launchpad
+        </div>
+        <span class="small text-muted">Direct Portal Routes</span>
+      </div>
+
+      <div class="row g-4">
+        <!-- Admin Portal -->
+        <div class="col-md-4">
+          <div class="ht-card h-100 p-3 bg-subtle border">
+            <div class="d-flex align-items-center gap-2 mb-2">
+              <span class="ht-badge badge-danger">ADMIN</span>
+              <h5 class="mb-0 fw-bold">Super Admin</h5>
+            </div>
+            <p class="small text-muted mb-3">Workflow control, user &amp; team management, winner locking (200 max) &amp; certificates.</p>
+            <a href="admin/dashboard.html" class="btn-ht-primary w-100 py-2">
+              <i class="bi bi-speedometer2"></i> Admin Dashboard
+            </a>
+          </div>
+        </div>
+
+        <!-- Organizer Portal -->
+        <div class="col-md-4">
+          <div class="ht-card h-100 p-3 bg-subtle border">
+            <div class="d-flex align-items-center gap-2 mb-2">
+              <span class="ht-badge badge-info">ORGANIZER</span>
+              <h5 class="mb-0 fw-bold">Event Desk</h5>
+            </div>
+            <p class="small text-muted mb-3">Organizer team registration, strong QR pass generator, live camera scanner, and edit controls.</p>
+            <a href="organizer/dashboard.html" class="btn-ht-primary w-100 py-2" style="background:#0284C7;">
+              <i class="bi bi-qr-code-scan"></i> Organizer Console
+            </a>
+          </div>
+        </div>
+
+        <!-- Judge Portal -->
+        <div class="col-md-4">
+          <div class="ht-card h-100 p-3 bg-subtle border">
+            <div class="d-flex align-items-center gap-2 mb-2">
+              <span class="ht-badge badge-primary">JUDGE</span>
+              <h5 class="mb-0 fw-bold">Jury Panel</h5>
+            </div>
+            <p class="small text-muted mb-3">2-Round multi-criteria scoring sliders (100 marks per round), duplicate block, and team dossiers.</p>
+            <a href="judge/dashboard.html" class="btn-ht-primary w-100 py-2">
+              <i class="bi bi-pencil-square"></i> Jury Portal
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="py-4 border-top text-center text-muted small bg-card">
+    <div class="container">
+      ⚙ <b>HackTrack</b> — Synora'26 National Flagship Hackathon Platform • 2-Round Judging Architecture (200 Max Marks).
+    </div>
+  </footer>
+
+  <!-- Scripts -->
+  <script src="js/config.js"></script>
+  <script src="js/demo-data.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/utils.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', async () => {
+      try {
+        const stats = await API.request('getDashboardStats');
+        document.getElementById('landing-teams').textContent = stats.totalTeams;
+        document.getElementById('landing-participants').textContent = stats.totalParticipants;
+        document.getElementById('landing-attendance').textContent = stats.attendanceRate;
+      } catch (e) {}
+
+      // Certificate Search Handler
+      const searchForm = document.getElementById('landingCertSearchForm');
+      const resultBox = document.getElementById('landingCertResultBox');
+
+      if (searchForm) {
+        searchForm.addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const query = document.getElementById('landingCertSearchInput').value.trim().toLowerCase();
+          resultBox.style.display = 'block';
+          resultBox.innerHTML = `<div class="text-center py-3"><span class="spinner-border spinner-border-sm text-success"></span> Querying Certificate Registry...</div>`;
+
+          try {
+            const teams = await API.request('getTeams');
+            const certs = await API.request('getCertificates');
+            const settings = await API.request('getSettings');
+
+            const foundTeam = teams.find(t => 
+              t.teamId.toLowerCase() === query || 
+              (t.leaderEmail && t.leaderEmail.toLowerCase() === query) || 
+              (t.teamName && t.teamName.toLowerCase().includes(query))
+            );
+
+            if (!foundTeam) {
+              resultBox.innerHTML = `
+                <div class="alert alert-warning border-warning d-flex align-items-center gap-3">
+                  <i class="bi bi-exclamation-triangle-fill fs-3 text-warning"></i>
+                  <div>
+                    <h6 class="fw-bold mb-1">No Team Found</h6>
+                    <p class="small mb-0">No matching team found for "<b>${query}</b>". Please verify your Team ID (e.g. HT2026001) or Leader Email.</p>
+                  </div>
+                </div>
+              `;
+              return;
+            }
+
+            const isCertReleased = settings.isCertificateSystemEnabled || certs.some(c => c.teamId === foundTeam.teamId && c.status === "RELEASED");
+
+            if (!isCertReleased) {
+              resultBox.innerHTML = `
+                <div class="alert alert-info border-info d-flex align-items-center gap-3">
+                  <i class="bi bi-lock-fill fs-3 text-info"></i>
+                  <div>
+                    <h6 class="fw-bold mb-1">Certificates Pending Release</h6>
+                    <p class="small mb-0">Team <b>${foundTeam.teamName}</b> (${foundTeam.teamId}) is verified. However, administrators have not yet released the certificates. Please check back after the closing ceremony.</p>
+                  </div>
+                </div>
+              `;
+              return;
+            }
+
+            // Certificates Released -> Render Member Buttons!
+            resultBox.innerHTML = `
+              <div class="p-4 bg-subtle rounded border border-success">
+                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+                  <div>
+                    <h5 class="fw-bold text-success mb-0"><i class="bi bi-award-fill"></i> ${foundTeam.teamName} (${foundTeam.teamId})</h5>
+                    <p class="small text-muted mb-0">${foundTeam.college} • Project: <i>"${foundTeam.projectTitle || 'Flagship Innovation'}"</i></p>
+                  </div>
+                  <span class="ht-badge badge-active">✓ Verified &amp; Issued</span>
+                </div>
+
+                <div class="row g-2">
+                  <div class="col-md-6">
+                    <a href="certificate.html?teamId=${foundTeam.teamId}&name=${encodeURIComponent(foundTeam.leaderName)}&role=Team Leader" target="_blank" class="btn btn-outline-success w-100 p-2 d-flex justify-content-between align-items-center">
+                      <span>👑 <b>${foundTeam.leaderName}</b> (Leader)</span>
+                      <span><i class="bi bi-download"></i> View Cert</span>
+                    </a>
+                  </div>
+                  ${foundTeam.member2Name ? `
+                    <div class="col-md-6">
+                      <a href="certificate.html?teamId=${foundTeam.teamId}&name=${encodeURIComponent(foundTeam.member2Name)}&role=Core Team Member" target="_blank" class="btn btn-outline-success w-100 p-2 d-flex justify-content-between align-items-center">
+                        <span>👤 <b>${foundTeam.member2Name}</b></span>
+                        <span><i class="bi bi-download"></i> View Cert</span>
+                      </a>
+                    </div>
+                  ` : ''}
+                  ${foundTeam.member3Name ? `
+                    <div class="col-md-6">
+                      <a href="certificate.html?teamId=${foundTeam.teamId}&name=${encodeURIComponent(foundTeam.member3Name)}&role=Core Team Member" target="_blank" class="btn btn-outline-success w-100 p-2 d-flex justify-content-between align-items-center">
+                        <span>👤 <b>${foundTeam.member3Name}</b></span>
+                        <span><i class="bi bi-download"></i> View Cert</span>
+                      </a>
+                    </div>
+                  ` : ''}
+                  ${foundTeam.member4Name ? `
+                    <div class="col-md-6">
+                      <a href="certificate.html?teamId=${foundTeam.teamId}&name=${encodeURIComponent(foundTeam.member4Name)}&role=Core Team Member" target="_blank" class="btn btn-outline-success w-100 p-2 d-flex justify-content-between align-items-center">
+                        <span>👤 <b>${foundTeam.member4Name}</b></span>
+                        <span><i class="bi bi-download"></i> View Cert</span>
+                      </a>
+                    </div>
+                  ` : ''}
+                </div>
+              </div>
+            `;
+
+          } catch (err) {
+            resultBox.innerHTML = `<div class="alert alert-danger">${err.message}</div>`;
+          }
+        });
+      }
+    });
+  </script>
+</body>
+</html>

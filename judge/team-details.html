@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Team Details — HackTrack | Synora'26</title>
+  
+  <!-- CSS Dependencies -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+  <link rel="stylesheet" href="../css/style.css">
+  <link rel="stylesheet" href="../css/dashboard.css">
+  <link rel="stylesheet" href="../css/forms.css">
+  <link rel="stylesheet" href="../css/tables.css">
+  <link rel="stylesheet" href="../css/responsive.css">
+</head>
+<body>
+
+  <div class="ht-sidebar-overlay" onclick="Utils.closeSidebar()"></div>
+
+  <div class="ht-app-wrapper">
+
+    <!-- Judge Sidebar -->
+    <aside class="ht-sidebar">
+      <div class="ht-sidebar-brand">
+        <div class="brand-icon" style="background: linear-gradient(135deg, #4F46E5, #06B6D4);">⚙</div>
+        <div>
+          <div>HackTrack</div>
+          <span class="brand-sub">Synora'26 Jury Panel</span>
+        </div>
+      </div>
+
+      <nav class="ht-sidebar-nav">
+        <!-- JURY PANEL -->
+        <div>
+          <div class="ht-nav-group-title">JURY PANEL</div>
+          <ul class="ht-nav-list">
+            <li>
+              <a href="dashboard.html" class="ht-nav-link active">
+                <i class="bi bi-grid-1x2-fill"></i> Dashboard
+              </a>
+            </li>
+          </ul>
+        </div>
+      </nav>
+
+      <div class="ht-sidebar-footer">
+        <button class="ht-logout-btn" onclick="Auth.logout()">
+          <i class="bi bi-box-arrow-right"></i> Logout
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="ht-main-content">
+      
+      <!-- Topbar Header -->
+      <header class="ht-topbar">
+        <div class="ht-topbar-left">
+          <button class="ht-mobile-toggle" onclick="Utils.toggleSidebar()">
+            <i class="bi bi-list"></i>
+          </button>
+          <div class="ht-page-heading">
+            <i class="bi bi-folder-fill text-primary"></i> Team Dossier &amp; Abstract
+          </div>
+        </div>
+
+        <div class="ht-topbar-right">
+          <button class="theme-toggle-btn" onclick="Utils.toggleTheme()" title="Toggle Dark/Light Mode">
+            <i class="bi bi-moon-stars-fill" id="theme-toggle-icon"></i>
+          </button>
+
+          <div class="user-profile-widget">
+            <div class="user-avatar" id="topbar-user-avatar" style="background: linear-gradient(135deg, #4F46E5, #3730A3);">JD</div>
+            <div class="user-info">
+              <span class="user-name" id="topbar-user-name">Prof. Alan Turing</span>
+              <span class="user-role-tag" id="topbar-user-role" style="color:#4F46E5;">JUDGE</span>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <!-- Content Body -->
+      <div class="ht-content-body">
+        
+        <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+          <div>
+            <h3 class="fw-bold mb-1" id="detailTeamName">Team Name</h3>
+            <span class="team-id-badge fs-6" id="detailTeamId">HT2026001</span>
+          </div>
+          <a href="dashboard.html" class="btn-ht-outline">
+            <i class="bi bi-arrow-left"></i> Back to Dashboard
+          </a>
+        </div>
+
+        <!-- Project Dossier Card -->
+        <div class="ht-card mb-4">
+          <div class="ht-card-header">
+            <div class="ht-card-title">
+              <i class="bi bi-file-earmark-text-fill text-primary"></i> Project Overview
+            </div>
+            <span class="domain-badge" id="detailDomain">Domain</span>
+          </div>
+
+          <h5 class="fw-bold text-primary mb-2" id="detailProjectTitle">Project Title</h5>
+          <p class="text-secondary small mb-3"><i class="bi bi-geo-alt-fill"></i> <span id="detailCollege">College Name</span></p>
+
+          <div class="p-3 bg-subtle rounded border mb-4">
+            <div class="small fw-bold text-muted text-uppercase mb-1">Problem Statement</div>
+            <p class="mb-0 text-secondary" id="detailProblemStatement">Problem statement details...</p>
+          </div>
+
+          <h6 class="fw-bold mb-3">Student Roster</h6>
+          <div class="list-group">
+            <div class="list-group-item d-flex justify-content-between align-items-center">
+              <div>
+                <span class="badge bg-primary me-2">Leader</span> <span id="detailLeader">Leader Name</span>
+              </div>
+            </div>
+            <div class="list-group-item">
+              <span class="badge bg-secondary me-2">Member 2</span> <span id="detailM2">Member 2</span>
+            </div>
+            <div class="list-group-item">
+              <span class="badge bg-secondary me-2">Member 3</span> <span id="detailM3">Member 3</span>
+            </div>
+            <div class="list-group-item">
+              <span class="badge bg-secondary me-2">Member 4</span> <span id="detailM4">Member 4</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </main>
+
+  </div>
+
+  <!-- Scripts -->
+  <script src="../js/config.js"></script>
+  <script src="../js/demo-data.js"></script>
+  <script src="../js/api.js"></script>
+  <script src="../js/utils.js"></script>
+  <script src="../js/auth.js"></script>
+  <script src="../js/judge.js"></script>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      Judge.initTeamDetailsPage();
+    });
+  </script>
+</body>
+</html>

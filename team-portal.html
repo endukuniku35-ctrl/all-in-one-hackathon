@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Team Live Pass &amp; Portal — HackTrack | Synora'26</title>
+  
+  <!-- CSS Dependencies -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/forms.css">
+  <link rel="stylesheet" href="css/tables.css">
+  <link rel="stylesheet" href="css/responsive.css">
+</head>
+<body class="bg-main py-4">
+
+  <!-- Floating Theme Toggle -->
+  <div class="position-absolute top-0 end-0 m-3">
+    <button class="theme-toggle-btn" onclick="Utils.toggleTheme()" title="Toggle Dark/Light Mode">
+      <i class="bi bi-moon-stars-fill" id="theme-toggle-icon"></i>
+    </button>
+  </div>
+
+  <div class="container" style="max-width: 780px;">
+
+    <!-- Top Header Branding -->
+    <div class="text-center mb-4">
+      <div class="d-inline-flex align-items-center justify-content-center mb-2" style="width:46px; height:46px; background:linear-gradient(135deg, #2563EB, #06B6D4); border-radius:12px; color:#fff; font-size:1.4rem; font-weight:bold;">
+        ⚙
+      </div>
+      <h3 class="fw-bold mb-0 text-primary">HackTrack Pass</h3>
+      <p class="small text-secondary mb-1">Synora'26 Official Participant Team Portal</p>
+      <div class="d-inline-flex align-items-center gap-2 px-3 py-1 rounded-pill bg-card border shadow-xs">
+        <span class="live-indicator"><span class="pulse-dot"></span> VERIFIED TEAM PASS</span>
+        <span class="small mono text-muted" id="portalTokenHash">HT26-SEC-...</span>
+      </div>
+    </div>
+
+    <!-- 1. Team & Member Details Card (Always Visible) -->
+    <div class="ht-card mb-4 border-primary">
+      <div class="ht-card-header">
+        <div>
+          <span class="ht-badge badge-primary mb-1">Registered Squad</span>
+          <h4 class="fw-bold mb-0 text-primary" id="portalTeamName">Loading Team...</h4>
+          <span class="small text-muted" id="portalCollege">College • Department</span>
+        </div>
+        <div class="text-end">
+          <span class="team-id-badge fs-6" id="portalTeamId">HT2026001</span>
+          <div class="mt-2">
+            <span class="ht-badge badge-present" id="portalAttBadge">
+              <i class="bi bi-check-circle-fill"></i> Checked In
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Member Roster List -->
+      <h6 class="fw-bold text-muted text-uppercase small mb-3">Official Team Member Roster</h6>
+      <div class="list-group mb-2" id="portalMembersList">
+        <!-- Dynamically Populated -->
+      </div>
+    </div>
+
+    <!-- 2. Problem Statement & Project Submission Module (Dynamic State) -->
+    <div class="ht-card mb-4" id="portalProblemModule">
+      <!-- Dynamically Rendered: Locked, Submission Form, or Submitted Receipt -->
+    </div>
+
+    <!-- 3. Judging Rounds Status Strip (2 Rounds) -->
+    <div class="ht-card mb-4">
+      <div class="ht-card-header">
+        <div class="ht-card-title">
+          <i class="bi bi-award text-primary"></i> Jury Evaluation Rounds (200 Total Marks)
+        </div>
+        <span class="small text-muted">2 Independent Tiers</span>
+      </div>
+
+      <div class="row g-3 text-center">
+        <div class="col-6">
+          <div class="p-3 bg-subtle rounded border">
+            <div class="small fw-bold text-muted text-uppercase mb-1">Round 1 (100 Marks)</div>
+            <div class="small text-secondary mb-2">Innovation, Pitch &amp; Ideation</div>
+            <span class="ht-badge badge-active" id="portalR1Badge">Active</span>
+          </div>
+        </div>
+        <div class="col-6">
+          <div class="p-3 bg-subtle rounded border">
+            <div class="small fw-bold text-muted text-uppercase mb-1">Round 2 (100 Marks)</div>
+            <div class="small text-secondary mb-2">Prototype &amp; Working Demo</div>
+            <span class="ht-badge badge-active" id="portalR2Badge">Active</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4. Certificates Release Module -->
+    <div id="portalCertificatesModule"></div>
+
+    <!-- Footer -->
+    <div class="text-center py-3 text-muted small">
+      ⚙ <b>HackTrack | Synora'26</b> • Dynamic Participant Portal<br>
+      For team modifications or technical assistance, contact the Organizer Desk.
+    </div>
+
+  </div>
+
+  <!-- Scripts -->
+  <script src="js/config.js"></script>
+  <script src="js/demo-data.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/utils.js"></script>
+
+  <script>
+    let currentTeamData = null;
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      const params = new URLSearchParams(window.location.search);
+      const teamId = params.get('teamId') || params.get('token') || 'HT2026001';
+
+      try {
+        currentTeamData = await API.request('getTeam', { teamId });
+        renderTeamPortal(currentTeamData);
+      } catch (err) {
+        document.body.innerHTML = `
+          <div class="container py-5 text-center" style="max-width: 500px;">
+            <div class="ht-card p-4">
+              <i class="bi bi-exclamation-triangle-fill fs-1 text-danger mb-2"></i>
+              <h4>Invalid or Expired Pass</h4>
+              <p class="text-secondary">${err.message}</p>
+              <a href="index.html" class="btn-ht-primary mt-3">Return to Home</a>
+            </div>
+          </div>
+        `;
+      }
+    });
+
+    async function renderTeamPortal(team) {
+      document.getElementById('portalTeamName').textContent = team.teamName;
+      document.getElementById('portalTeamId').textContent = team.teamId;
+      document.getElementById('portalCollege').textContent = `${team.college} • ${team.department}`;
+      document.getElementById('portalTokenHash').textContent = team.qrCodeToken || `HT26-SEC-${team.teamId}`;
+
+      // Render Roster
+      const roster = document.getElementById('portalMembersList');
+      roster.innerHTML = `
+        <div class="list-group-item d-flex justify-content-between align-items-center">
+          <div>
+            <span class="badge bg-primary me-2">Leader</span> <b>${team.leaderName}</b>
+            <div class="small text-muted">${team.leaderEmail} • ${team.leaderPhone || '-'}</div>
+          </div>
+          <span class="ht-badge badge-active">Active</span>
+        </div>
+        ${team.member2Name ? `
+          <div class="list-group-item">
+            <span class="badge bg-secondary me-2">Member 2</span> <b>${team.member2Name}</b>
+            <div class="small text-muted">${team.member2Email || '-'}</div>
+          </div>
+        ` : ''}
+        ${team.member3Name ? `
+          <div class="list-group-item">
+            <span class="badge bg-secondary me-2">Member 3</span> <b>${team.member3Name}</b>
+            <div class="small text-muted">${team.member3Email || '-'}</div>
+          </div>
+        ` : ''}
+        ${team.member4Name ? `
+          <div class="list-group-item">
+            <span class="badge bg-secondary me-2">Member 4</span> <b>${team.member4Name}</b>
+            <div class="small text-muted">${team.member4Email || '-'}</div>
+          </div>
+        ` : ''}
+      `;
+
+      // Check Workflow Settings
+      const configs = await API.request('getRoundConfig');
+      const isProblemReleased = configs.find(c => c.roundId === 'problem_statements')?.status === 'active';
+      const isR1Active = configs.find(c => c.roundId === 'round1')?.status === 'active';
+      const isR2Active = configs.find(c => c.roundId === 'round2')?.status === 'active';
+
+      document.getElementById('portalR1Badge').className = `ht-badge ${isR1Active ? 'badge-active' : 'badge-locked'}`;
+      document.getElementById('portalR1Badge').textContent = isR1Active ? 'Active' : 'Locked';
+
+      document.getElementById('portalR2Badge').className = `ht-badge ${isR2Active ? 'badge-active' : 'badge-locked'}`;
+      document.getElementById('portalR2Badge').textContent = isR2Active ? 'Active' : 'Locked';
+
+      // Check Certificate Release Status
+      const certContainer = document.getElementById('portalCertificatesModule');
+      if (certContainer) {
+        try {
+          const certs = await API.request('getCertificates');
+          const teamCerts = certs.filter(c => c.teamId === team.teamId);
+          const settings = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.SETTINGS) || '{}');
+          const isCertReleased = settings.isCertificateSystemEnabled || teamCerts.length > 0;
+
+          if (isCertReleased) {
+            certContainer.innerHTML = `
+              <div class="ht-card mb-4 border-success">
+                <div class="ht-card-header bg-success-subtle p-3 rounded-top">
+                  <div class="ht-card-title text-success">
+                    <i class="bi bi-award-fill"></i> Official Team Certificates Released!
+                  </div>
+                  <span class="ht-badge badge-active">Available for Download</span>
+                </div>
+                <div class="p-3">
+                  <p class="small text-secondary mb-3">Congratulations on completing Synora'26! Official participation and merit certificates are now ready for download, printing, and online verification.</p>
+                  <div class="d-grid gap-2">
+                    <a href="certificate.html?teamId=${team.teamId}&name=${encodeURIComponent(team.leaderName)}&role=Team Leader" target="_blank" class="btn btn-outline-primary d-flex justify-content-between align-items-center">
+                      <span>👑 <b>${team.leaderName}</b> (Team Leader)</span>
+                      <span><i class="bi bi-download"></i> View &amp; Print Certificate</span>
+                    </a>
+                    ${team.member2Name ? `
+                      <a href="certificate.html?teamId=${team.teamId}&name=${encodeURIComponent(team.member2Name)}&role=Core Team Member" target="_blank" class="btn btn-outline-primary d-flex justify-content-between align-items-center">
+                        <span>👤 <b>${team.member2Name}</b></span>
+                        <span><i class="bi bi-download"></i> View &amp; Print Certificate</span>
+                      </a>
+                    ` : ''}
+                    ${team.member3Name ? `
+                      <a href="certificate.html?teamId=${team.teamId}&name=${encodeURIComponent(team.member3Name)}&role=Core Team Member" target="_blank" class="btn btn-outline-primary d-flex justify-content-between align-items-center">
+                        <span>👤 <b>${team.member3Name}</b></span>
+                        <span><i class="bi bi-download"></i> View &amp; Print Certificate</span>
+                      </a>
+                    ` : ''}
+                    ${team.member4Name ? `
+                      <a href="certificate.html?teamId=${team.teamId}&name=${encodeURIComponent(team.member4Name)}&role=Core Team Member" target="_blank" class="btn btn-outline-primary d-flex justify-content-between align-items-center">
+                        <span>👤 <b>${team.member4Name}</b></span>
+                        <span><i class="bi bi-download"></i> View &amp; Print Certificate</span>
+                      </a>
+                    ` : ''}
+                  </div>
+                </div>
+              </div>
+            `;
+          } else {
+            certContainer.innerHTML = `
+              <div class="ht-card mb-4">
+                <div class="p-3 text-center">
+                  <div class="text-secondary mb-1" style="font-size:1.5rem;"><i class="bi bi-award"></i></div>
+                  <h6 class="fw-bold mb-1">Official Certificates: Pending Release</h6>
+                  <p class="small text-muted mb-0">Participation and achievement credentials will be unlocked here once results and winners are declared by organizers.</p>
+                </div>
+              </div>
+            `;
+          }
+        } catch (e) {
+          console.error("Certificate check error", e);
+        }
+      }
+
+      const problemContainer = document.getElementById('portalProblemModule');
+
+      // State 1: Already Submitted & Locked for Team
+      if (team.submissionLocked || team.problemSubmitted) {
+        problemContainer.innerHTML = `
+          <div class="ht-card-header bg-success-subtle p-3 rounded-top">
+            <div class="ht-card-title text-success">
+              <i class="bi bi-lock-fill"></i> Problem Statement Locked for Team
+            </div>
+            <span class="ht-badge badge-active">Submitted &amp; Immutable</span>
+          </div>
+          <div class="p-3">
+            <div class="mb-2">
+              <div class="small fw-bold text-muted text-uppercase">Project Title</div>
+              <div class="fw-bold fs-6 text-primary">${team.projectTitle}</div>
+            </div>
+            <div class="mb-2">
+              <span class="domain-badge">${team.domain}</span>
+            </div>
+            <div class="p-3 bg-subtle rounded border">
+              <div class="small fw-bold text-muted text-uppercase mb-1">Problem Statement</div>
+              <p class="mb-0 text-secondary">${team.problemStatement}</p>
+            </div>
+            <div class="alert alert-info border-info small mt-3 mb-0">
+              <i class="bi bi-info-circle-fill me-1"></i>
+              <b>One-Time Access Policy:</b> Your submission is locked. Only logged-in Organizers or Administrators can modify project details.
+            </div>
+          </div>
+        `;
+        return;
+      }
+
+      // State 2: Problem Statements Phase NOT Released Yet
+      if (!isProblemReleased) {
+        problemContainer.innerHTML = `
+          <div class="p-4 text-center">
+            <i class="bi bi-lock-fill fs-1 text-warning mb-2"></i>
+            <h5 class="fw-bold">Problem Statement Release Pending</h5>
+            <p class="small text-secondary mb-0">
+              Organizers have not yet unlocked the problem statement submission phase. Once released, this portal will automatically activate your one-time submission form.
+            </p>
+          </div>
+        `;
+        return;
+      }
+
+      // State 3: Problem Statements Released & Unlocked for One-Time Submission!
+      problemContainer.innerHTML = `
+        <div class="ht-card-header">
+          <div>
+            <div class="ht-card-title text-primary">
+              <i class="bi bi-unlock-fill"></i> Select &amp; Lock Your Problem Statement
+            </div>
+            <p class="small text-muted mb-0">You have ONE-TIME ACCESS to submit. Once locked, this cannot be modified by the team.</p>
+          </div>
+          <span class="ht-badge badge-warning">1-Time Access</span>
+        </div>
+
+        <form id="teamProblemSubmitForm" class="p-3">
+          <div class="ht-form-group">
+            <label class="ht-label" for="portalSelectDomain">Select Project Domain <span class="required">*</span></label>
+            <select id="portalSelectDomain" class="ht-select" required>
+              <option value="">Choose Domain...</option>
+              ${CONFIG.DOMAINS.map(d => `<option value="${d}">${d}</option>`).join('')}
+            </select>
+          </div>
+
+          <div class="ht-form-group">
+            <label class="ht-label" for="portalProjectTitleInput">Project Title <span class="required">*</span></label>
+            <input type="text" id="portalProjectTitleInput" class="ht-input" placeholder="e.g. Autonomous AI Diagnostics Engine" required>
+          </div>
+
+          <div class="ht-form-group">
+            <label class="ht-label" for="portalProblemInput">Problem Statement Selection / Description <span class="required">*</span></label>
+            <select id="portalSampleProblemSelect" class="ht-select mb-2" onchange="document.getElementById('portalProblemInput').value = this.value">
+              <option value="">-- Choose From Released Problem Statements --</option>
+              ${CONFIG.SAMPLE_PROBLEM_STATEMENTS.map(ps => `<option value="${ps.id}: ${ps.title}">${ps.id}: ${ps.title} (${ps.domain})</option>`).join('')}
+            </select>
+            <textarea id="portalProblemInput" class="ht-textarea" placeholder="Or write your tailored problem statement description..." required></textarea>
+          </div>
+
+          <div class="d-flex justify-content-end mt-3">
+            <button type="submit" class="btn-ht-primary fs-6 px-4 py-2" id="submitProblemLockBtn">
+              <i class="bi bi-lock-fill"></i> Lock In Problem Statement
+            </button>
+          </div>
+        </form>
+      `;
+
+      // Attach Submission Handler
+      document.getElementById('teamProblemSubmitForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const domain = document.getElementById('portalSelectDomain').value;
+        const projectTitle = document.getElementById('portalProjectTitleInput').value.trim();
+        const problemStatement = document.getElementById('portalProblemInput').value.trim();
+        const btn = document.getElementById('submitProblemLockBtn');
+
+        if (!domain || !projectTitle || !problemStatement) {
+          Utils.showToast("Please fill in all mandatory fields.", "warning");
+          return;
+        }
+
+        if (!confirm("Are you sure? Once submitted, your problem statement will be permanently locked for the team.")) {
+          return;
+        }
+
+        try {
+          btn.disabled = true;
+          btn.innerHTML = `<span class="spinner-border spinner-border-sm me-2"></span> Locking In...`;
+
+          await API.request('submitTeamProblemDetails', {
+            teamId: team.teamId,
+            token: team.qrCodeToken,
+            domain,
+            projectTitle,
+            problemStatement
+          });
+
+          Utils.showToast("✓ Problem statement locked in successfully!", "success");
+          setTimeout(() => {
+            window.location.reload();
+          }, 1000);
+
+        } catch (err) {
+          btn.disabled = false;
+          btn.innerHTML = `<i class="bi bi-lock-fill"></i> Lock In Problem Statement`;
+          Utils.showToast(err.message, "danger");
+        }
+      });
+    }
+  </script>
+</body>
+</html>

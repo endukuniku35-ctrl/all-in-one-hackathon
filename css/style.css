@@ -1,0 +1,356 @@
+/* ==========================================================================
+   HackTrack | Synora'26 — Master Design Tokens & Core Styles
+   Modern SaaS Design System (Enterprise Clean + Dark/Light Theme)
+   ========================================================================== */
+
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+:root {
+  /* Brand Palette */
+  --ht-primary: #2563EB;
+  --ht-primary-hover: #1D4ED8;
+  --ht-primary-light: rgba(37, 99, 235, 0.1);
+  --ht-primary-subtle: #EFF6FF;
+
+  --ht-sidebar-bg: #0F172A;
+  --ht-sidebar-text: #94A3B8;
+  --ht-sidebar-hover: #1E293B;
+  --ht-sidebar-active: #2563EB;
+  --ht-sidebar-border: rgba(255, 255, 255, 0.08);
+
+  --ht-success: #10B981;
+  --ht-success-light: rgba(16, 185, 129, 0.12);
+  --ht-warning: #F59E0B;
+  --ht-warning-light: rgba(245, 158, 11, 0.12);
+  --ht-danger: #EF4444;
+  --ht-danger-light: rgba(239, 68, 68, 0.12);
+  --ht-info: #06B6D4;
+  --ht-info-light: rgba(6, 182, 212, 0.12);
+
+  /* Light Theme Surfaces */
+  --ht-bg-main: #F8FAFC;
+  --ht-bg-card: #FFFFFF;
+  --ht-bg-subtle: #F1F5F9;
+  --ht-border: #E2E8F0;
+  --ht-border-subtle: #EDF2F7;
+
+  /* Typography Colors */
+  --ht-text-primary: #0F172A;
+  --ht-text-secondary: #475569;
+  --ht-text-muted: #94A3B8;
+  --ht-text-inverse: #FFFFFF;
+
+  /* Elevation */
+  --ht-shadow-xs: 0 1px 2px 0 rgba(0, 0, 0, 0.04);
+  --ht-shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.08), 0 1px 2px -1px rgba(0, 0, 0, 0.08);
+  --ht-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.08), 0 2px 4px -2px rgba(0, 0, 0, 0.06);
+  --ht-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -4px rgba(0, 0, 0, 0.04);
+  --ht-shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.06);
+
+  /* Dimensions & Radii */
+  --ht-radius-sm: 6px;
+  --ht-radius-md: 10px;
+  --ht-radius-lg: 14px;
+  --ht-radius-xl: 20px;
+  --ht-radius-pill: 9999px;
+
+  --ht-sidebar-width: 260px;
+  --ht-header-height: 68px;
+
+  /* Fonts */
+  --ht-font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --ht-font-mono: 'JetBrains Mono', monospace;
+}
+
+/* Dark Theme Overrides */
+[data-theme="dark"] {
+  --ht-bg-main: #0B1120;
+  --ht-bg-card: #131E33;
+  --ht-bg-subtle: #1E293B;
+  --ht-border: #1E293B;
+  --ht-border-subtle: #192338;
+
+  --ht-text-primary: #F8FAFC;
+  --ht-text-secondary: #94A3B8;
+  --ht-text-muted: #64748B;
+
+  --ht-primary-light: rgba(37, 99, 235, 0.2);
+  --ht-primary-subtle: #172554;
+
+  --ht-sidebar-bg: #070D19;
+  --ht-sidebar-hover: #131E33;
+
+  --ht-shadow-xs: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
+  --ht-shadow-sm: 0 2px 4px 0 rgba(0, 0, 0, 0.4);
+  --ht-shadow-md: 0 6px 12px -2px rgba(0, 0, 0, 0.5);
+  --ht-shadow-lg: 0 12px 24px -4px rgba(0, 0, 0, 0.6);
+}
+
+/* Reset & Base */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--ht-font-sans);
+  background-color: var(--ht-bg-main);
+  color: var(--ht-text-primary);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.25s ease, color 0.25s ease;
+  min-height: 100vh;
+}
+
+/* Typography Helpers */
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 700;
+  color: var(--ht-text-primary);
+  line-height: 1.25;
+}
+
+a {
+  color: var(--ht-primary);
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+
+a:hover {
+  color: var(--ht-primary-hover);
+}
+
+.mono {
+  font-family: var(--ht-font-mono);
+}
+
+/* Common Card */
+.ht-card {
+  background-color: var(--ht-bg-card);
+  border: 1px solid var(--ht-border);
+  border-radius: var(--ht-radius-lg);
+  box-shadow: var(--ht-shadow-sm);
+  padding: 1.5rem;
+  transition: all 0.2s ease;
+}
+
+.ht-card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--ht-shadow-md);
+}
+
+.ht-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 1rem;
+  margin-bottom: 1.25rem;
+  border-bottom: 1px solid var(--ht-border-subtle);
+}
+
+.ht-card-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--ht-text-primary);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Buttons */
+.btn-ht-primary {
+  background-color: var(--ht-primary);
+  color: #FFFFFF;
+  border: none;
+  font-weight: 600;
+  padding: 0.625rem 1.25rem;
+  border-radius: var(--ht-radius-md);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  transition: all 0.15s ease;
+  box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2);
+}
+
+.btn-ht-primary:hover {
+  background-color: var(--ht-primary-hover);
+  color: #FFFFFF;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(37, 99, 235, 0.3);
+}
+
+.btn-ht-outline {
+  background-color: transparent;
+  color: var(--ht-text-primary);
+  border: 1px solid var(--ht-border);
+  font-weight: 600;
+  padding: 0.6rem 1.2rem;
+  border-radius: var(--ht-radius-md);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  transition: all 0.15s ease;
+}
+
+.btn-ht-outline:hover {
+  background-color: var(--ht-bg-subtle);
+  border-color: var(--ht-text-muted);
+  color: var(--ht-text-primary);
+}
+
+.btn-ht-danger {
+  background-color: var(--ht-danger);
+  color: #FFFFFF;
+  border: none;
+  font-weight: 600;
+  padding: 0.6rem 1.2rem;
+  border-radius: var(--ht-radius-md);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  transition: all 0.15s ease;
+}
+
+.btn-ht-danger:hover {
+  background-color: #DC2626;
+  color: #FFFFFF;
+}
+
+.btn-ht-success {
+  background-color: var(--ht-success);
+  color: #FFFFFF;
+  border: none;
+  font-weight: 600;
+  padding: 0.6rem 1.2rem;
+  border-radius: var(--ht-radius-md);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  transition: all 0.15s ease;
+}
+
+.btn-ht-success:hover {
+  background-color: #059669;
+  color: #FFFFFF;
+}
+
+/* Badges & Status Pills */
+.ht-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.65rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  border-radius: var(--ht-radius-pill);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.badge-active, .badge-present, .badge-released {
+  background-color: var(--ht-success-light);
+  color: var(--ht-success);
+}
+
+.badge-locked, .badge-disabled, .badge-absent {
+  background-color: var(--ht-danger-light);
+  color: var(--ht-danger);
+}
+
+.badge-pending, .badge-warning {
+  background-color: var(--ht-warning-light);
+  color: var(--ht-warning);
+}
+
+.badge-info {
+  background-color: var(--ht-info-light);
+  color: var(--ht-info);
+}
+
+.badge-primary {
+  background-color: var(--ht-primary-light);
+  color: var(--ht-primary);
+}
+
+/* Domain Pill */
+.domain-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  border-radius: var(--ht-radius-md);
+  background-color: var(--ht-bg-subtle);
+  color: var(--ht-text-secondary);
+  border: 1px solid var(--ht-border);
+}
+
+/* Toast Container */
+#ht-toast-container {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 380px;
+  width: calc(100vw - 48px);
+  pointer-events: none;
+}
+
+.ht-toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  background-color: var(--ht-bg-card);
+  color: var(--ht-text-primary);
+  border: 1px solid var(--ht-border);
+  padding: 14px 18px;
+  border-radius: var(--ht-radius-lg);
+  box-shadow: var(--ht-shadow-xl);
+  font-size: 0.9rem;
+  animation: slideInRight 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.25s ease;
+}
+
+.ht-toast-icon {
+  font-size: 1.25rem;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.ht-toast.success .ht-toast-icon { color: var(--ht-success); }
+.ht-toast.danger .ht-toast-icon { color: var(--ht-danger); }
+.ht-toast.warning .ht-toast-icon { color: var(--ht-warning); }
+.ht-toast.info .ht-toast-icon { color: var(--ht-info); }
+
+@keyframes slideInRight {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: var(--ht-bg-main);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--ht-border);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--ht-text-muted);
+}

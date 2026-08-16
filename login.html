@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Login — HackTrack | Synora'26</title>
+  
+  <!-- CSS Dependencies -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/forms.css">
+  <link rel="stylesheet" href="css/responsive.css">
+</head>
+<body class="bg-main d-flex align-items-center justify-content-center py-5 min-vh-100 position-relative">
+
+  <!-- Floating Theme Toggle -->
+  <div class="position-absolute top-0 end-0 m-4">
+    <button class="theme-toggle-btn" onclick="Utils.toggleTheme()" title="Toggle Dark/Light Mode">
+      <i class="bi bi-moon-stars-fill" id="theme-toggle-icon"></i>
+    </button>
+  </div>
+
+  <div class="container" style="max-width: 480px;">
+    
+    <!-- Brand Header -->
+    <div class="text-center mb-4">
+      <div class="d-inline-flex align-items-center justify-content-center mb-2" style="width:50px; height:50px; background:linear-gradient(135deg, #2563EB, #06B6D4); border-radius:12px; color:#fff; font-size:1.5rem; font-weight:bold;">
+        ⚙
+      </div>
+      <h2 class="fw-bold mb-0">HackTrack</h2>
+      <p class="small text-secondary mt-1">Synora'26 Hackathon Management Suite</p>
+    </div>
+
+    <!-- Login Card -->
+    <div class="ht-card p-4 p-sm-5 shadow-lg">
+      <h4 class="fw-bold mb-1">Sign In to Portal</h4>
+      <p class="text-muted small mb-4">Select your assigned role to access your authorized console.</p>
+
+      <form id="loginForm">
+        
+        <!-- Role Selection -->
+        <div class="ht-form-group">
+          <label class="ht-label" for="loginRole">Select System Role <span class="required">*</span></label>
+          <select id="loginRole" class="ht-select" required>
+            <option value="admin">Admin (Full Control)</option>
+            <option value="organizer">Organizer (Event &amp; Registration)</option>
+            <option value="judge">Judge / Evaluator (Jury Scoring)</option>
+          </select>
+        </div>
+
+        <!-- Email / Username -->
+        <div class="ht-form-group">
+          <label class="ht-label" for="loginEmail">Email / Username <span class="required">*</span></label>
+          <input type="email" id="loginEmail" class="ht-input" placeholder="e.g. admin@synora.io" required value="admin@synora.io">
+        </div>
+
+        <!-- Password -->
+        <div class="ht-form-group">
+          <div class="d-flex justify-content-between align-items-center mb-1">
+            <label class="ht-label mb-0" for="loginPassword">Password <span class="required">*</span></label>
+            <a href="javascript:void(0)" onclick="Utils.showToast('Demo password for all accounts is: admin', 'info')" class="small text-primary">Forgot Password?</a>
+          </div>
+          <div class="position-relative">
+            <input type="password" id="loginPassword" class="ht-input pe-5" placeholder="Enter password" required value="admin">
+            <button type="button" class="btn position-absolute top-50 end-0 translate-middle-y text-muted border-0 me-2" onclick="togglePasswordVisibility()">
+              <i class="bi bi-eye" id="pwdToggleIcon"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- Submit Button -->
+        <button type="submit" class="btn-ht-primary w-100 py-2 fs-6 mt-3" id="loginSubmitBtn">
+          <i class="bi bi-box-arrow-in-right"></i> Sign In to Dashboard
+        </button>
+
+      </form>
+
+      <!-- Quick Demo Account Switcher -->
+      <div class="mt-4 pt-3 border-top">
+        <div class="small fw-bold text-muted text-uppercase mb-2">⚡ 1-Click Quick Demo Login</div>
+        <div class="d-flex flex-wrap gap-2">
+          <button type="button" class="btn btn-sm btn-outline-danger" onclick="fillDemo('admin@synora.io', 'admin', 'admin')">
+            Admin
+          </button>
+          <button type="button" class="btn btn-sm btn-outline-info" onclick="fillDemo('organizer@synora.io', 'admin', 'organizer')">
+            Organizer
+          </button>
+          <button type="button" class="btn btn-sm btn-outline-primary" onclick="fillDemo('judge1@synora.io', 'admin', 'judge')">
+            Judge 1 (AI/ML)
+          </button>
+          <button type="button" class="btn btn-sm btn-outline-primary" onclick="fillDemo('judge2@synora.io', 'admin', 'judge')">
+            Judge 2 (Cloud)
+          </button>
+          <button type="button" class="btn btn-sm btn-outline-primary" onclick="fillDemo('judge3@synora.io', 'admin', 'judge')">
+            Judge 3 (Security)
+          </button>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Back Link -->
+    <div class="text-center mt-4">
+      <a href="index.html" class="small text-muted"><i class="bi bi-arrow-left"></i> Return to Homepage</a>
+    </div>
+
+  </div>
+
+  <!-- Scripts -->
+  <script src="js/config.js"></script>
+  <script src="js/demo-data.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/utils.js"></script>
+  <script src="js/auth.js"></script>
+
+  <script>
+    function togglePasswordVisibility() {
+      const input = document.getElementById('loginPassword');
+      const icon = document.getElementById('pwdToggleIcon');
+      if (input.type === 'password') {
+        input.type = 'text';
+        icon.className = 'bi bi-eye-slash';
+      } else {
+        input.type = 'password';
+        icon.className = 'bi bi-eye';
+      }
+    }
+
+    function fillDemo(email, pwd, role) {
+      document.getElementById('loginEmail').value = email;
+      document.getElementById('loginPassword').value = pwd;
+      document.getElementById('loginRole').value = role;
+      Utils.showToast(`Selected Demo Profile: ${email} (${role.toUpperCase()})`, 'info');
+    }
+
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = document.getElementById('loginEmail').value.trim();
+      const password = document.getElementById('loginPassword').value.trim();
+      const role = document.getElementById('loginRole').value;
+      const btn = document.getElementById('loginSubmitBtn');
+
+      try {
+        btn.disabled = true;
+        btn.innerHTML = `<span class="spinner-border spinner-border-sm me-2"></span> Authenticating...`;
+
+        const user = await API.request('login', { email, password, role });
+        Auth.setSession(user);
+        Utils.showToast(`Welcome back, ${user.name}!`, 'success');
+
+        setTimeout(() => {
+          if (user.role.toLowerCase() === 'admin') {
+            window.location.href = 'admin/dashboard.html';
+          } else if (user.role.toLowerCase() === 'organizer') {
+            window.location.href = 'organizer/dashboard.html';
+          } else if (user.role.toLowerCase() === 'judge') {
+            window.location.href = 'judge/dashboard.html';
+          } else {
+            window.location.href = 'index.html';
+          }
+        }, 600);
+
+      } catch (err) {
+        btn.disabled = false;
+        btn.innerHTML = `<i class="bi bi-box-arrow-in-right"></i> Sign In to Dashboard`;
+        Utils.showToast(err.message, 'danger');
+      }
+    });
+  </script>
+</body>
+</html>

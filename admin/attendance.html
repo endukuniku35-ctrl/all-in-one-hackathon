@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Attendance Logs — HackTrack | Synora'26</title>
+  
+  <!-- CSS Dependencies -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+  <link rel="stylesheet" href="../css/style.css">
+  <link rel="stylesheet" href="../css/dashboard.css">
+  <link rel="stylesheet" href="../css/forms.css">
+  <link rel="stylesheet" href="../css/tables.css">
+  <link rel="stylesheet" href="../css/responsive.css">
+</head>
+<body>
+
+  <div class="ht-sidebar-overlay" onclick="Utils.closeSidebar()"></div>
+
+  <div class="ht-app-wrapper">
+
+    <!-- Admin Sidebar -->
+    <aside class="ht-sidebar">
+      <div class="ht-sidebar-brand">
+        <div class="brand-icon">⚙</div>
+        <div>
+          <div>HackTrack</div>
+          <span class="brand-sub">Synora'26 Admin</span>
+        </div>
+      </div>
+
+      <nav class="ht-sidebar-nav">
+        <!-- OVERVIEW -->
+        <div>
+          <div class="ht-nav-group-title">OVERVIEW</div>
+          <ul class="ht-nav-list">
+            <li>
+              <a href="dashboard.html" class="ht-nav-link">
+                <i class="bi bi-speedometer2"></i> Dashboard
+              </a>
+            </li>
+          </ul>
+        </div>
+
+        <!-- MANAGEMENT -->
+        <div>
+          <div class="ht-nav-group-title">MANAGEMENT</div>
+          <ul class="ht-nav-list">
+            <li>
+              <a href="users.html" class="ht-nav-link">
+                <i class="bi bi-people-fill"></i> User Accounts
+              </a>
+            </li>
+            <li>
+              <a href="teams.html" class="ht-nav-link">
+                <i class="bi bi-diagram-3-fill"></i> Teams
+              </a>
+            </li>
+            <li>
+              <a href="attendance.html" class="ht-nav-link active">
+                <i class="bi bi-qr-code-scan"></i> Attendance
+              </a>
+            </li>
+          </ul>
+        </div>
+
+        <!-- JUDGING -->
+        <div>
+          <div class="ht-nav-group-title">JUDGING</div>
+          <ul class="ht-nav-list">
+            <li>
+              <a href="leaderboard.html" class="ht-nav-link">
+                <i class="bi bi-trophy-fill"></i> Leaderboard
+              </a>
+            </li>
+          </ul>
+        </div>
+
+        <!-- OUTPUT -->
+        <div>
+          <div class="ht-nav-group-title">OUTPUT</div>
+          <ul class="ht-nav-list">
+            <li>
+              <a href="certificates.html" class="ht-nav-link">
+                <i class="bi bi-award-fill"></i> Certificates
+              </a>
+            </li>
+          </ul>
+        </div>
+
+        <!-- SYSTEM -->
+        <div>
+          <div class="ht-nav-group-title">SYSTEM</div>
+          <ul class="ht-nav-list">
+            <li>
+              <a href="activity-logs.html" class="ht-nav-link">
+                <i class="bi bi-journal-text"></i> Activity Logs
+              </a>
+            </li>
+          </ul>
+        </div>
+      </nav>
+
+      <div class="ht-sidebar-footer">
+        <button class="ht-logout-btn" onclick="Auth.logout()">
+          <i class="bi bi-box-arrow-right"></i> Logout
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="ht-main-content">
+      
+      <!-- Topbar Header -->
+      <header class="ht-topbar">
+        <div class="ht-topbar-left">
+          <button class="ht-mobile-toggle" onclick="Utils.toggleSidebar()">
+            <i class="bi bi-list"></i>
+          </button>
+          <div class="ht-page-heading">
+            <i class="bi bi-qr-code-scan text-primary"></i> Attendance Registry &amp; Logs
+          </div>
+        </div>
+
+        <div class="ht-topbar-right">
+          <button class="theme-toggle-btn" onclick="Utils.toggleTheme()" title="Toggle Dark/Light Mode">
+            <i class="bi bi-moon-stars-fill" id="theme-toggle-icon"></i>
+          </button>
+
+          <div class="user-profile-widget">
+            <div class="user-avatar" id="topbar-user-avatar">AD</div>
+            <div class="user-info">
+              <span class="user-name" id="topbar-user-name">Super Administrator</span>
+              <span class="user-role-tag" id="topbar-user-role">ADMIN</span>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <!-- Content Body -->
+      <div class="ht-content-body">
+        
+        <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+          <div>
+            <h3 class="fw-bold mb-1">Live Attendance Registry</h3>
+            <p class="text-muted small mb-0">Check-in timestamp audits captured via QR camera scans and desk terminals.</p>
+          </div>
+          <button class="btn-ht-outline" onclick="Admin.exportReport('attendance', 'csv')">
+            <i class="bi bi-download"></i> Export Attendance (CSV)
+          </button>
+        </div>
+
+        <!-- Filter Bar -->
+        <div class="table-filter-bar">
+          <div class="filter-group-left">
+            <div class="table-search-input">
+              <i class="bi bi-search"></i>
+              <input type="text" id="attSearchInput" placeholder="Filter by Team Name, ID or College...">
+            </div>
+            <select class="filter-select" id="attStatusFilter">
+              <option value="">All Statuses</option>
+              <option value="Present">Present Only</option>
+              <option value="Absent">Absent Only</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Attendance Table -->
+        <div class="ht-table-container">
+          <table class="ht-table">
+            <thead>
+              <tr>
+                <th>Team ID</th>
+                <th>Team Name</th>
+                <th>College</th>
+                <th>Department</th>
+                <th>Status</th>
+                <th>Check-in Timestamp</th>
+              </tr>
+            </thead>
+            <tbody id="attendanceTableBody">
+              <!-- Dynamically Rendered -->
+            </tbody>
+          </table>
+        </div>
+
+      </div>
+    </main>
+
+  </div>
+
+  <!-- Scripts -->
+  <script src="../js/config.js"></script>
+  <script src="../js/demo-data.js"></script>
+  <script src="../js/api.js"></script>
+  <script src="../js/utils.js"></script>
+  <script src="../js/auth.js"></script>
+  <script src="../js/admin.js"></script>
+  <script src="../js/attendance.js"></script>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      Attendance.initLogs();
+    });
+  </script>
+</body>
+</html>
