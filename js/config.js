@@ -15,7 +15,7 @@ const CONFIG = {
   MODE: "production",
 
   // Google Apps Script Web App API URL
-  API_URL: "https://script.google.com/macros/s/AKfycby9seIb7uRuzTOq3SP0ImVY2AFYJJyBWhZxTqKjttrKgRFzIoqatOWZwwF9DANPTY7o/exec", // Live Google Cloud API
+  API_URL: "https://script.google.com/macros/s/AKfycbya5kDZAhezp4E-y_67tL8ctNFYAhfv2O3md8-l6KvIlvrihQEQ7PP_0TMm0o2_Agax/exec", // Live Google Cloud API
 
   // Exactly Two Independent Judging Rounds (100 Marks Each, Total 200)
   ROUNDS: {

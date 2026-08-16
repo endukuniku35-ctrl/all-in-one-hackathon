@@ -332,7 +332,7 @@ function handleAction(action, data, method) {
 
     case "getTeam":
       auth(["ADMIN", "ORGANIZER", "JUDGE"]);
-      return getTeam(ss, data.teamId || data.token || data.identifier);
+      return getTeam(ss, data.teamId || data.token || data.identifier, data._session);
 
     case "getRoundConfig":
       auth(["ADMIN", "ORGANIZER", "JUDGE"]);
@@ -967,14 +967,14 @@ function getTeams(ss, data) {
   });
 }
 
-function getTeam(ss, identifier) {
+function getTeam(ss, identifier, session) {
   ss = ss || getSpreadsheet();
   if (!identifier) throw new Error("TEAM_NOT_FOUND: Team identifier is required.");
   identifier = identifier.trim();
-  var teams = getTeams(ss);
+  var teams = getTeams(ss, { _session: session });
 
   for (var i = 0; i < teams.length; i++) {
-    if (teams[i].teamId === identifier || teams[i].qrCodeToken === identifier || (teams[i].leaderEmail && teams[i].leaderEmail.toLowerCase() === identifier.toLowerCase())) {
+    if (teams[i].teamId === identifier || teams[i].qrCodeToken === identifier) {
       return teams[i];
     }
   }
@@ -1790,7 +1790,11 @@ function createUser(ss, data) {
 
     var count = users.length + 1;
     var userId = "USR-" + (data.role || "JDG").substring(0, 3).toUpperCase() + "-" + ("00" + count).slice(-2);
-    var password = (data.password || "admin").trim();
+    
+    if (!data.password || String(data.password).trim().length < 6) {
+      throw new Error("VALIDATION_ERROR: A secure password of at least 6 characters is required when creating a user account.");
+    }
+    var password = String(data.password).trim();
     var passwordHash = hashPassword(password);
     var timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss");
 
@@ -2153,7 +2157,25 @@ function renderCloudTeamPortal(teamId, token) {
     team.problemStatement.trim().length > 0);
   var isSubmitted = (team.submissionLocked === true || team.submissionLocked === "true" || team.problemSubmitted === true || team.problemSubmitted === "true" || hasStatement);
 
-  var teamJson = JSON.stringify(team);
+  // SANITIZE PUBLIC PII: Strip emails, phone numbers, and raw secrets from client DOM
+  var publicTeam = {
+    teamId: team.teamId,
+    teamName: team.teamName,
+    college: team.college || "University",
+    department: team.department || "",
+    domain: team.domain || "",
+    projectTitle: team.projectTitle || "",
+    problemStatement: team.problemStatement || "",
+    submissionLocked: isSubmitted,
+    problemSubmitted: isSubmitted,
+    leaderName: team.leaderName || "",
+    member2Name: team.member2Name || "",
+    member3Name: team.member3Name || "",
+    member4Name: team.member4Name || "",
+    qrCodeToken: team.qrCodeToken || lookupToken
+  };
+
+  var teamJson = JSON.stringify(publicTeam);
   var certsJson = JSON.stringify(teamCerts);
 
   var html = '<!DOCTYPE html><html lang="en"><head>' +
@@ -2211,7 +2233,7 @@ function renderCloudTeamPortal(teamId, token) {
   '      <div class="small text-secondary" style="font-size:0.75rem;">Cloud Pass • ' + escapeHtml(team.teamId) + '</div>' +
   '    </div>' +
   '  </div>' +
-  '  <div id="verifiedStatusBadge"><span class="badge-pill amber"><i class="bi bi-shield-lock"></i> VERIFICATION READY</span></div>' +
+  '  <div id="verifiedStatusBadge"><span class="badge-pill amber"><i class="bi bi-shield-lock"></i> VERIFICATION REQUIRED</span></div>' +
   '</div>' +
 
   '<!-- 2. TEAM OVERVIEW CARD -->' +
@@ -2225,7 +2247,7 @@ function renderCloudTeamPortal(teamId, token) {
   '  </div>' +
   '</div>' +
 
-  '<!-- 3. SEAMLESS MEMBER VERIFICATION CARD -->' +
+  '<!-- 3. SEAMLESS MEMBER VERIFICATION CARD (ZERO PII EXPOSED) -->' +
   '<div class="easy-card mb-3" id="easyVerificationCard" style="border-left:5px solid var(--cyan);background:linear-gradient(180deg, rgba(6,182,212,0.08) 0%, rgba(15,23,42,1) 100%);">' +
   '  <div class="d-flex justify-content-between align-items-center mb-2">' +
   '    <div class="fw-bold text-white"><i class="bi bi-person-badge text-info me-1"></i> Member Identity Verification</div>' +
@@ -2233,15 +2255,15 @@ function renderCloudTeamPortal(teamId, token) {
   '  </div>' +
   '  <p class="small text-secondary mb-2">Select who you are to easily unlock verified project submission &amp; certificates:</p>' +
   '  <div class="d-flex flex-wrap gap-2 mb-3" id="memberChipsContainer">' +
-  (team.leaderName ? ('<div class="member-chip" onclick="selectMemberToVerify(\'' + escapeHtml(team.leaderName) + '\', \'' + escapeHtml(team.leaderEmail || "") + '\', \'Team Leader\')">👑 ' + escapeHtml(team.leaderName) + ' <span class="badge bg-warning text-dark ms-1">Leader</span></div>') : '') +
-  (team.member2Name ? ('<div class="member-chip" onclick="selectMemberToVerify(\'' + escapeHtml(team.member2Name) + '\', \'' + escapeHtml(team.member2Email || "") + '\', \'Member\')">👤 ' + escapeHtml(team.member2Name) + '</div>') : '') +
-  (team.member3Name ? ('<div class="member-chip" onclick="selectMemberToVerify(\'' + escapeHtml(team.member3Name) + '\', \'' + escapeHtml(team.member3Email || "") + '\', \'Member\')">👤 ' + escapeHtml(team.member3Name) + '</div>') : '') +
-  (team.member4Name ? ('<div class="member-chip" onclick="selectMemberToVerify(\'' + escapeHtml(team.member4Name) + '\', \'' + escapeHtml(team.member4Email || "") + '\', \'Member\')">👤 ' + escapeHtml(team.member4Name) + '</div>') : '') +
+  (team.leaderName ? ('<div class="member-chip" onclick="selectMemberToVerify(\'' + escapeHtml(team.leaderName) + '\', \'Team Leader\')">👑 ' + escapeHtml(team.leaderName) + ' <span class="badge bg-warning text-dark ms-1">Leader</span></div>') : '') +
+  (team.member2Name ? ('<div class="member-chip" onclick="selectMemberToVerify(\'' + escapeHtml(team.member2Name) + '\', \'Member\')">👤 ' + escapeHtml(team.member2Name) + '</div>') : '') +
+  (team.member3Name ? ('<div class="member-chip" onclick="selectMemberToVerify(\'' + escapeHtml(team.member3Name) + '\', \'Member\')">👤 ' + escapeHtml(team.member3Name) + '</div>') : '') +
+  (team.member4Name ? ('<div class="member-chip" onclick="selectMemberToVerify(\'' + escapeHtml(team.member4Name) + '\', \'Member\')">👤 ' + escapeHtml(team.member4Name) + '</div>') : '') +
   '  </div>' +
   '  <div id="verifyEmailInputArea" style="display:none;">' +
-  '    <label class="small text-secondary fw-bold mb-1">Confirm Registered Email for <span id="verifyingNameLabel" class="text-white"></span>:</label>' +
+  '    <label class="small text-secondary fw-bold mb-1">Enter registered email for <span id="verifyingNameLabel" class="text-white fw-bold"></span>:</label>' +
   '    <div class="d-flex gap-2">' +
-  '      <input type="email" id="quickVerifyEmail" placeholder="e.g. participant@university.edu" style="margin-bottom:0;">' +
+  '      <input type="email" id="quickVerifyEmail" placeholder="e.g. yourname@university.edu" style="margin-bottom:0;" autocomplete="email">' +
   '      <button class="btn-main" style="width:auto;white-space:nowrap;padding:10px 18px;" onclick="executeQuickVerify()">Verify</button>' +
   '    </div>' +
   '    <div id="quickVerifyError" class="small text-danger mt-1" style="display:none;"></div>' +
@@ -2290,7 +2312,7 @@ function renderCloudTeamPortal(teamId, token) {
     '<div class="small text-secondary fw-bold text-uppercase mb-1">Problem Statement &amp; Solution Summary</div>' +
     '<div class="p-3 rounded mb-3 text-light" style="background:#070B19;border:1px solid #1E293B;white-space:pre-wrap;font-size:0.95rem;line-height:1.65;">' + escapeHtml(team.problemStatement || "No description provided.") + '</div>' +
     '<div class="alert py-2 small mb-0" style="background:#082F49;border:1px solid #0284C7;color:#BAE6FD;">' +
-    '  <i class="bi bi-shield-check me-1"></i> <b>Google Cloud Secured:</b> Project permanently locked on live ledger.</div>'
+    '  <i class="bi bi-shield-check me-1"></i> <b>Cloud Secured:</b> Project permanently locked on live ledger.</div>'
   ) : (
     '<div class="d-flex justify-content-between align-items-center mb-2">' +
     '  <h5 class="text-warning fw-bold mb-0">📝 Submit Your Project Details</h5>' +
@@ -2316,30 +2338,26 @@ function renderCloudTeamPortal(teamId, token) {
   '  </div>' +
   '</div>' +
 
-  '<!-- ================= TAB 3: TEAM MEMBERS ================= -->' +
+  '<!-- ================= TAB 3: TEAM MEMBERS (ZERO PII EXPOSED) ================= -->' +
   '<div class="tab-content-panel" id="tabPanel_team">' +
   '  <div class="easy-card">' +
   '    <h6 class="text-white fw-bold mb-3">👥 Registered Team Members</h6>' +
   '    <div class="d-flex flex-column gap-2">' +
   (team.leaderName ? ('<div class="d-flex align-items-center justify-content-between p-2 rounded" style="background:#070B19;border:1px solid #1E293B;">' +
     '<div class="d-flex align-items-center gap-2"><div class="avatar-circle">' + escapeHtml(team.leaderName.charAt(0).toUpperCase()) + '</div>' +
-    '<div><div class="fw-bold text-white">👑 ' + escapeHtml(team.leaderName) + ' <span class="badge bg-warning text-dark ms-1">Leader</span></div>' +
-    (team.leaderEmail ? '<div class="small text-secondary">' + escapeHtml(team.leaderEmail) + '</div>' : '') + '</div></div>' +
+    '<div class="fw-bold text-white">👑 ' + escapeHtml(team.leaderName) + ' <span class="badge bg-warning text-dark ms-1">Leader</span></div></div>' +
     '<span class="badge-pill emerald">Verified</span></div>') : '') +
   (team.member2Name ? ('<div class="d-flex align-items-center justify-content-between p-2 rounded" style="background:#070B19;border:1px solid #1E293B;">' +
     '<div class="d-flex align-items-center gap-2"><div class="avatar-circle">' + escapeHtml(team.member2Name.charAt(0).toUpperCase()) + '</div>' +
-    '<div><div class="fw-bold text-white">👤 ' + escapeHtml(team.member2Name) + '</div>' +
-    (team.member2Email ? '<div class="small text-secondary">' + escapeHtml(team.member2Email) + '</div>' : '') + '</div></div>' +
+    '<div class="fw-bold text-white">👤 ' + escapeHtml(team.member2Name) + '</div></div>' +
     '<span class="badge-pill emerald">Verified</span></div>') : '') +
   (team.member3Name ? ('<div class="d-flex align-items-center justify-content-between p-2 rounded" style="background:#070B19;border:1px solid #1E293B;">' +
     '<div class="d-flex align-items-center gap-2"><div class="avatar-circle">' + escapeHtml(team.member3Name.charAt(0).toUpperCase()) + '</div>' +
-    '<div><div class="fw-bold text-white">👤 ' + escapeHtml(team.member3Name) + '</div>' +
-    (team.member3Email ? '<div class="small text-secondary">' + escapeHtml(team.member3Email) + '</div>' : '') + '</div></div>' +
+    '<div class="fw-bold text-white">👤 ' + escapeHtml(team.member3Name) + '</div></div>' +
     '<span class="badge-pill emerald">Verified</span></div>') : '') +
   (team.member4Name ? ('<div class="d-flex align-items-center justify-content-between p-2 rounded" style="background:#070B19;border:1px solid #1E293B;">' +
     '<div class="d-flex align-items-center gap-2"><div class="avatar-circle">' + escapeHtml(team.member4Name.charAt(0).toUpperCase()) + '</div>' +
-    '<div><div class="fw-bold text-white">👤 ' + escapeHtml(team.member4Name) + '</div>' +
-    (team.member4Email ? '<div class="small text-secondary">' + escapeHtml(team.member4Email) + '</div>' : '') + '</div></div>' +
+    '<div class="fw-bold text-white">👤 ' + escapeHtml(team.member4Name) + '</div></div>' +
     '<span class="badge-pill emerald">Verified</span></div>') : '') +
   '    </div>' +
   '  </div>' +
@@ -2379,7 +2397,7 @@ function renderCloudTeamPortal(teamId, token) {
   '  if (panel) panel.classList.add("active");' +
   '}' +
 
-  'function selectMemberToVerify(name, email, role) {' +
+  'function selectMemberToVerify(name, role) {' +
   '  document.querySelectorAll(".member-chip").forEach(function(c){ c.classList.remove("selected"); });' +
   '  if (event && event.currentTarget) event.currentTarget.classList.add("selected");' +
   '  var inputArea = document.getElementById("verifyEmailInputArea");' +
@@ -2387,7 +2405,7 @@ function renderCloudTeamPortal(teamId, token) {
   '  var input = document.getElementById("quickVerifyEmail");' +
   '  label.textContent = name;' +
   '  inputArea.style.display = "block";' +
-  '  input.value = email || "";' +
+  '  input.value = "";' +
   '  input.focus();' +
   '}' +
 
@@ -2396,7 +2414,7 @@ function renderCloudTeamPortal(teamId, token) {
   '  var err = document.getElementById("quickVerifyError");' +
   '  err.style.display = "none";' +
   '  if (!email || !email.includes("@")) {' +
-  '    err.textContent = "Please enter a valid email address."; err.style.display = "block"; return;' +
+  '    err.textContent = "Please enter your valid registered email address."; err.style.display = "block"; return;' +
   '  }' +
   '  google.script.run' +
   '    .withSuccessHandler(function(res) {' +
@@ -2426,7 +2444,7 @@ function renderCloudTeamPortal(teamId, token) {
   'function resetVerification() {' +
   '  verifiedMember = null;' +
   '  try { localStorage.removeItem("hacktrack_pass_user_" + (TEAM.qrCodeToken||TEAM.teamId)); } catch(e){}' +
-  '  document.getElementById("verifiedStatusBadge").innerHTML = \'<span class="badge-pill amber"><i class="bi bi-shield-lock"></i> VERIFICATION READY</span>\';' +
+  '  document.getElementById("verifiedStatusBadge").innerHTML = \'<span class="badge-pill amber"><i class="bi bi-shield-lock"></i> VERIFICATION REQUIRED</span>\';' +
   '  document.getElementById("memberChipsContainer").style.display = "flex";' +
   '  document.getElementById("verifiedSuccessBox").style.display = "none";' +
   '  document.getElementById("verifyEmailInputArea").style.display = "none";' +
@@ -2480,6 +2498,12 @@ function renderCloudTeamPortal(teamId, token) {
 
   'function handleEasySubmit(e) {' +
   '  e.preventDefault();' +
+  '  if (!verifiedMember || !verifiedMember.viewerEmail) {' +
+  '    showToast("⚠ Please select your name and verify your email first.");' +
+  '    var card = document.getElementById("easyVerificationCard");' +
+  '    if (card) card.scrollIntoView({ behavior: "smooth" });' +
+  '    return;' +
+  '  }' +
   '  var domain = document.getElementById("easyDomain").value;' +
   '  var title = document.getElementById("easyTitle").value.trim();' +
   '  var ps = document.getElementById("easyPS").value.trim();' +
@@ -2488,7 +2512,6 @@ function renderCloudTeamPortal(teamId, token) {
   '  if (!confirm("Are you sure you want to lock this project? Once submitted, it cannot be modified.")) return;' +
   '  btn.disabled = true;' +
   '  btn.innerHTML = \'<span class="spinner"></span>Locking in Google Cloud...\';' +
-  '  var submitEmail = verifiedMember ? verifiedMember.viewerEmail : (TEAM.leaderEmail || "");' +
   '  google.script.run' +
   '    .withSuccessHandler(function() {' +
   '      var box = document.getElementById("projectDetailsBox");' +
@@ -2502,7 +2525,7 @@ function renderCloudTeamPortal(teamId, token) {
   '        \'<div class="small text-secondary fw-bold text-uppercase mb-1">Problem Statement &amp; Solution Summary</div>\' +' +
   '        \'<div class="p-3 rounded mb-2 text-light" style="background:#070B19;border:1px solid #1E293B;white-space:pre-wrap;font-size:0.95rem;line-height:1.65;">\' + esc(ps) + \'</div>\' +' +
   '        \'<div class="alert py-2 small mb-0" style="background:#082F49;border:1px solid #0284C7;color:#BAE6FD;">\' +' +
-  '        \'<i class="bi bi-shield-check me-1"></i> <b>Google Cloud Secured:</b> Problem statement permanently locked on live ledger.</div>\';' +
+  '        \'<i class="bi bi-shield-check me-1"></i> <b>Cloud Secured:</b> Problem statement permanently locked on live ledger.</div>\';' +
   '      document.getElementById("btnTabProject").innerHTML = \'<i class="bi bi-code-slash"></i> Project ✓\';' +
   '      showToast("✓ Project details locked successfully!");' +
   '    })' +
@@ -2511,7 +2534,7 @@ function renderCloudTeamPortal(teamId, token) {
   '      btn.innerHTML = "🔒 Submit &amp; Permanently Lock In";' +
   '      status.innerHTML = \'<div class="alert alert-danger py-2 small">\' + (err.message||String(err)) + \'</div>\';' +
   '    })' +
-  '    .submitTeamProblemDetails(TEAM.teamId, TEAM.qrCodeToken, domain, title, ps);' +
+  '    .submitTeamProblemDetailsVerified(TEAM.teamId, (TEAM.qrCodeToken || "' + escapeHtml(lookupToken) + '"), verifiedMember.viewerEmail, domain, title, ps);' +
   '}' +
 
   'function downloadPassImage() {' +
@@ -2531,7 +2554,7 @@ function renderCloudTeamPortal(teamId, token) {
   '  ctx.fillStyle = "#38BDF8"; ctx.font = "bold 15px monospace";' +
   '  ctx.fillText("TOKEN: " + (TEAM.qrCodeToken || "' + escapeHtml(lookupToken) + '"), 200, 330);' +
   '  ctx.fillStyle = "#34D399"; ctx.font = "13px sans-serif";' +
-  '  ctx.fillText("✓ Verified Identity • Google Cloud Pass", 200, 380);' +
+  '  ctx.fillText("✓ Verified Identity • Cloud Pass", 200, 380);' +
   '  var link = document.createElement("a");' +
   '  link.download = "HackTrack_Pass_" + TEAM.teamId + ".png";' +
   '  link.href = canvas.toDataURL("image/png");' +
@@ -2611,7 +2634,7 @@ function submitTeamProblemDetailsVerified(teamId, token, verifiedEmail, domain, 
   }
   if (!team) throw new Error("TEAM_NOT_FOUND: Team not found.");
 
-  // Check ownership: must be admin, organizer, or a registered team member
+  // Check ownership: must be active admin, active organizer, or a registered team member
   var users = getSheetObjects(ss.getSheetByName(SHEETS.USERS));
   var callerUser = null;
   for (var u = 0; u < users.length; u++) {
@@ -2622,6 +2645,7 @@ function submitTeamProblemDetailsVerified(teamId, token, verifiedEmail, domain, 
   }
 
   var isStaff = callerUser &&
+    String(callerUser.Status || "").toLowerCase() === "active" &&
     (String(callerUser.Role).toLowerCase() === "admin" ||
      String(callerUser.Role).toLowerCase() === "organizer");
 
