@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Evaluation Analytics — HackTrack | Synora'26</title>
+  
+  <!-- CSS Dependencies -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+  <link rel="stylesheet" href="../css/style.css">
+  <link rel="stylesheet" href="../css/dashboard.css">
+  <link rel="stylesheet" href="../css/tables.css">
+  <link rel="stylesheet" href="../css/responsive.css">
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+
+  <div class="ht-sidebar-overlay" onclick="Utils.closeSidebar()"></div>
+
+  <div class="ht-app-wrapper">
+
+    <!-- Admin Sidebar -->
+    <aside class="ht-sidebar">
+      <div class="ht-sidebar-brand">
+        <div class="brand-icon" style="background: linear-gradient(135deg, #2563EB, #06B6D4);">⚙</div>
+        <div>
+          <div>HackTrack</div>
+          <span class="brand-sub">Synora'26 Super Admin</span>
+        </div>
+      </div>
+
+      <nav class="ht-sidebar-nav">
+        <div>
+          <div class="ht-nav-group-title">CORE</div>
+          <ul class="ht-nav-list">
+            <li><a href="dashboard.html" class="ht-nav-link"><i class="bi bi-speedometer2"></i> Dashboard</a></li>
+            <li><a href="analytics.html" class="ht-nav-link active"><i class="bi bi-bar-chart-line-fill"></i> Analytics</a></li>
+          </ul>
+        </div>
+
+        <div>
+          <div class="ht-nav-group-title">MANAGEMENT</div>
+          <ul class="ht-nav-list">
+            <li><a href="teams.html" class="ht-nav-link"><i class="bi bi-diagram-3-fill"></i> Teams</a></li>
+            <li><a href="users.html" class="ht-nav-link"><i class="bi bi-people-fill"></i> Judges &amp; Users</a></li>
+            <li><a href="judge-assignment.html" class="ht-nav-link"><i class="bi bi-person-check-fill"></i> Judge Assignment</a></li>
+            <li><a href="attendance.html" class="ht-nav-link"><i class="bi bi-qr-code-scan"></i> Attendance</a></li>
+          </ul>
+        </div>
+
+        <div>
+          <div class="ht-nav-group-title">EVALUATION &amp; OUTCOMES</div>
+          <ul class="ht-nav-list">
+            <li><a href="leaderboard.html" class="ht-nav-link"><i class="bi bi-trophy-fill"></i> Leaderboard (200 Max)</a></li>
+            <li><a href="certificates.html" class="ht-nav-link"><i class="bi bi-award-fill"></i> Certificates</a></li>
+            <li><a href="activity-logs.html" class="ht-nav-link"><i class="bi bi-journal-text"></i> Activity Logs</a></li>
+          </ul>
+        </div>
+      </nav>
+
+      <div class="ht-sidebar-footer">
+        <button class="ht-logout-btn" onclick="Auth.logout()"><i class="bi bi-box-arrow-right"></i> Logout</button>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="ht-main-content">
+      
+      <!-- Topbar Header -->
+      <header class="ht-topbar">
+        <div class="ht-topbar-left">
+          <button class="ht-mobile-toggle" onclick="Utils.toggleSidebar()"><i class="bi bi-list"></i></button>
+          <div class="ht-page-heading"><i class="bi bi-bar-chart-line-fill text-primary"></i> Scoring Analytics &amp; Performance Insights</div>
+        </div>
+
+        <div class="ht-topbar-right">
+          <button class="theme-toggle-btn" onclick="Utils.toggleTheme()" title="Toggle Theme"><i class="bi bi-moon-stars-fill" id="theme-toggle-icon"></i></button>
+          <div class="user-profile-widget">
+            <div class="user-avatar" id="topbar-user-avatar">AD</div>
+            <div class="user-info">
+              <span class="user-name" id="topbar-user-name">Super Administrator</span>
+              <span class="user-role-tag" id="topbar-user-role">ADMIN</span>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <!-- Content Body -->
+      <div class="ht-content-body">
+        
+        <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+          <div>
+            <h3 class="fw-bold mb-1">Evaluation &amp; Performance Analytics</h3>
+            <p class="text-muted small mb-0">Multi-round score distributions, domain benchmarks, and criterion radar comparisons.</p>
+          </div>
+          <a href="../projector.html" target="_blank" class="btn btn-outline-primary btn-sm">
+            <i class="bi bi-display"></i> Launch Live Projector Stage Mode
+          </a>
+        </div>
+
+        <!-- 1. KPI Cards -->
+        <div class="ht-stats-grid mb-4">
+          <div class="stat-card">
+            <div class="stat-info-wrap">
+              <div class="stat-label">Evaluated Teams</div>
+              <div class="stat-value" id="analyticEvalRate">10 / 10</div>
+              <div class="stat-sub">Across Round 1 &amp; Round 2</div>
+            </div>
+            <div class="stat-icon-wrap"><i class="bi bi-check2-all"></i></div>
+          </div>
+
+          <div class="stat-card stat-info">
+            <div class="stat-info-wrap">
+              <div class="stat-label">Round 1 Average</div>
+              <div class="stat-value" id="analyticR1Avg">92.4</div>
+              <div class="stat-sub">Out of 100 Max Marks</div>
+            </div>
+            <div class="stat-icon-wrap"><i class="bi bi-graph-up"></i></div>
+          </div>
+
+          <div class="stat-card stat-success">
+            <div class="stat-info-wrap">
+              <div class="stat-label">Round 2 Average</div>
+              <div class="stat-value" id="analyticR2Avg">94.1</div>
+              <div class="stat-sub">Out of 100 Max Marks</div>
+            </div>
+            <div class="stat-icon-wrap"><i class="bi bi-cpu-fill"></i></div>
+          </div>
+
+          <div class="stat-card stat-warning">
+            <div class="stat-info-wrap">
+              <div class="stat-label">Top Score</div>
+              <div class="stat-value" id="analyticTopScore">196 / 200</div>
+              <div class="stat-sub">Highest Combined Standings</div>
+            </div>
+            <div class="stat-icon-wrap"><i class="bi bi-trophy-fill"></i></div>
+          </div>
+        </div>
+
+        <!-- 2. Charts Grid -->
+        <div class="row g-4 mb-4">
+          
+          <!-- Chart 1: R1 vs R2 Comparison -->
+          <div class="col-lg-8">
+            <div class="ht-card h-100 p-3">
+              <div class="ht-card-header pb-2">
+                <div class="ht-card-title"><i class="bi bi-bar-chart-fill text-primary"></i> Round 1 vs Round 2 Performance (Top 8 Teams)</div>
+                <span class="small text-muted">Max 100 / Round</span>
+              </div>
+              <div style="height: 320px; position: relative;">
+                <canvas id="r1VsR2Chart"></canvas>
+              </div>
+            </div>
+          </div>
+
+          <!-- Chart 2: Domain Share -->
+          <div class="col-lg-4">
+            <div class="ht-card h-100 p-3">
+              <div class="ht-card-header pb-2">
+                <div class="ht-card-title"><i class="bi bi-pie-chart-fill text-info"></i> Domain Cohort Share</div>
+              </div>
+              <div style="height: 320px; position: relative; display:flex; align-items:center; justify-content:center;">
+                <canvas id="domainPieChart"></canvas>
+              </div>
+            </div>
+          </div>
+
+          <!-- Chart 3: Criterion Radar Analysis -->
+          <div class="col-lg-6">
+            <div class="ht-card p-3">
+              <div class="ht-card-header pb-2">
+                <div class="ht-card-title"><i class="bi bi-radar text-warning"></i> 4-Criterion Mastery Profile (Top Teams)</div>
+                <span class="small text-muted">25 Max Per Criterion</span>
+              </div>
+              <div style="height: 300px; position: relative; display:flex; align-items:center; justify-content:center;">
+                <canvas id="criterionRadarChart"></canvas>
+              </div>
+            </div>
+          </div>
+
+          <!-- Chart 4: Score Distribution Histogram -->
+          <div class="col-lg-6">
+            <div class="ht-card p-3">
+              <div class="ht-card-header pb-2">
+                <div class="ht-card-title"><i class="bi bi-activity text-success"></i> Score Tier Distribution (/200 Grand Total)</div>
+                <span class="small text-muted">Total Score Ranges</span>
+              </div>
+              <div style="height: 300px; position: relative;">
+                <canvas id="scoreDistChart"></canvas>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+    </main>
+
+  </div>
+
+  <!-- Scripts -->
+  <script src="../js/config.js"></script>
+  <script src="../js/demo-data.js"></script>
+  <script src="../js/api.js"></script>
+  <script src="../js/utils.js"></script>
+  <script src="../js/auth.js"></script>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', async () => {
+      if (!Auth.requireRole('admin')) return;
+
+      try {
+        const leaderboard = await API.request('getLeaderboard');
+        const teams = await API.request('getTeams');
+        const topTeams = leaderboard.slice(0, 8);
+
+        // Calculate KPI values
+        let r1Sum = 0, r2Sum = 0, r1Count = 0, r2Count = 0;
+        leaderboard.forEach(item => {
+          if (item.round1 > 0) { r1Sum += item.round1; r1Count++; }
+          if (item.round2 > 0) { r2Sum += item.round2; r2Count++; }
+        });
+
+        document.getElementById('analyticR1Avg').textContent = r1Count > 0 ? (r1Sum / r1Count).toFixed(1) : '-';
+        document.getElementById('analyticR2Avg').textContent = r2Count > 0 ? (r2Sum / r2Count).toFixed(1) : '-';
+        document.getElementById('analyticTopScore').textContent = leaderboard[0] ? `${leaderboard[0].grandTotal} / 200` : '-';
+        document.getElementById('analyticEvalRate').textContent = `${r1Count} / ${teams.length}`;
+
+        // Chart 1: R1 vs R2 Bar Chart
+        new Chart(document.getElementById('r1VsR2Chart'), {
+          type: 'bar',
+          data: {
+            labels: topTeams.map(t => t.teamName.substring(0, 14)),
+            datasets: [
+              {
+                label: 'Round 1 (Pitch - /100)',
+                data: topTeams.map(t => t.round1),
+                backgroundColor: 'rgba(37, 99, 235, 0.85)',
+                borderRadius: 6
+              },
+              {
+                label: 'Round 2 (Demo - /100)',
+                data: topTeams.map(t => t.round2),
+                backgroundColor: 'rgba(6, 182, 212, 0.85)',
+                borderRadius: 6
+              }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+              y: { min: 60, max: 100, grid: { color: 'rgba(255,255,255,0.08)' } },
+              x: { grid: { display: false } }
+            }
+          }
+        });
+
+        // Chart 2: Domain Distribution
+        const domainCounts = {};
+        teams.forEach(t => {
+          const d = t.domain || 'Other';
+          domainCounts[d] = (domainCounts[d] || 0) + 1;
+        });
+
+        new Chart(document.getElementById('domainPieChart'), {
+          type: 'doughnut',
+          data: {
+            labels: Object.keys(domainCounts),
+            datasets: [{
+              data: Object.values(domainCounts),
+              backgroundColor: ['#2563EB', '#06B6D4', '#10B981', '#F59E0B', '#8B5CF6', '#EC4899'],
+              borderWidth: 0
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, color: '#94A3B8' } } }
+          }
+        });
+
+        // Chart 3: Radar Chart
+        new Chart(document.getElementById('criterionRadarChart'), {
+          type: 'radar',
+          data: {
+            labels: ['Innovation (25)', 'Feasibility (25)', 'Implementation (25)', 'Presentation (25)'],
+            datasets: [
+              {
+                label: topTeams[0]?.teamName || '1st Place Team',
+                data: [24.5, 24, 25, 24.5],
+                borderColor: '#EAB308',
+                backgroundColor: 'rgba(234, 179, 8, 0.2)'
+              },
+              {
+                label: topTeams[1]?.teamName || '2nd Place Team',
+                data: [24, 23.5, 24, 24],
+                borderColor: '#38BDF8',
+                backgroundColor: 'rgba(56, 189, 248, 0.2)'
+              }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: { r: { min: 15, max: 25, grid: { color: 'rgba(255,255,255,0.1)' } } }
+          }
+        });
+
+        // Chart 4: Score Distribution Histogram
+        const bins = { '180-200 (Top Tier)': 0, '160-179 (High Tier)': 0, '140-159 (Mid Tier)': 0, '<140 (Developing)': 0 };
+        leaderboard.forEach(t => {
+          if (t.grandTotal >= 180) bins['180-200 (Top Tier)']++;
+          else if (t.grandTotal >= 160) bins['160-179 (High Tier)']++;
+          else if (t.grandTotal >= 140) bins['140-159 (Mid Tier)']++;
+          else bins['<140 (Developing)']++;
+        });
+
+        new Chart(document.getElementById('scoreDistChart'), {
+          type: 'bar',
+          data: {
+            labels: Object.keys(bins),
+            datasets: [{
+              label: 'Number of Teams',
+              data: Object.values(bins),
+              backgroundColor: '#10B981',
+              borderRadius: 6
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+              y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.08)' } },
+              x: { grid: { display: false } }
+            }
+          }
+        });
+
+      } catch (err) {
+        console.error("Analytics load error", err);
+      }
+    });
+  </script>
+</body>
+</html>

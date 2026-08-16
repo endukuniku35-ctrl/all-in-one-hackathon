@@ -33,17 +33,17 @@ const API = {
   async request(action, payload = {}) {
     this.initLocalStore();
 
-    // Fast-path login authentication
-    if (action === "login") {
-      try {
-        const localUser = this.handleLocalAction("login", payload);
-        if (localUser) return localUser;
-      } catch (e) {}
+    // Attach active session token if available
+    if (typeof Auth !== "undefined" && Auth.getSession()) {
+      const sess = Auth.getSession();
+      if (sess && sess.sessionId && !payload.sessionId) {
+        payload.sessionId = sess.sessionId;
+      }
     }
 
     if (CONFIG.API_URL && CONFIG.API_URL.trim().startsWith("http")) {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 3500); // 3.5s cloud timeout
+      const timeoutId = setTimeout(() => controller.abort(), 6000); // 6s timeout for Google Apps Script
 
       try {
         const response = await fetch(CONFIG.API_URL, {
@@ -59,68 +59,23 @@ const API = {
         if (response.ok) {
           const resJson = await response.json();
           if (resJson.success) {
-            // Synchronize cloud data with local store cache
-            if (action === "getTeams") {
-              localStorage.setItem(CONFIG.STORAGE_KEYS.TEAMS, JSON.stringify(resJson.data));
-            } else if (action === "getAttendance") {
-              localStorage.setItem(CONFIG.STORAGE_KEYS.ATTENDANCE, JSON.stringify(resJson.data));
-            } else if (action === "getRoundConfig") {
-              localStorage.setItem(CONFIG.STORAGE_KEYS.ROUND_CONFIG, JSON.stringify(resJson.data));
-            } else if (action === "getUsers") {
-              localStorage.setItem(CONFIG.STORAGE_KEYS.USERS, JSON.stringify(resJson.data));
-            } else if (action === "registerTeam") {
-              const localTeams = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.TEAMS) || "[]");
-              localTeams.unshift(resJson.data);
-              localStorage.setItem(CONFIG.STORAGE_KEYS.TEAMS, JSON.stringify(localTeams));
-            } else if (action === "submitEvaluation") {
-              const round = (payload.round || "round1").toLowerCase();
-              const storageKey = (round === "round2") ? CONFIG.STORAGE_KEYS.EVALUATIONS_R2 : CONFIG.STORAGE_KEYS.EVALUATIONS_R1;
-              let evals = JSON.parse(localStorage.getItem(storageKey) || "[]");
-              evals = evals.filter(e => !(e.judgeId === payload.judgeId && e.teamId === payload.teamId));
-              evals.push({
-                evalId: (resJson.data && resJson.data.evalId) || `EV-${round.toUpperCase()}-${Date.now()}`,
-                judgeId: payload.judgeId,
-                judgeName: payload.judgeName,
-                teamId: payload.teamId,
-                teamName: payload.teamName,
-                c1: payload.c1,
-                c2: payload.c2,
-                c3: payload.c3,
-                c4: payload.c4,
-                total: (payload.c1 + payload.c2 + payload.c3 + payload.c4),
-                comments: payload.comments || "",
-                timestamp: new Date().toLocaleString()
-              });
-            } else if (action === "markAttendance") {
-              const att = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.ATTENDANCE) || "[]");
-              if (!att.some(a => a.teamId === (resJson.data.team && resJson.data.team.teamId))) {
-                att.unshift({
-                  attendanceId: resJson.data.attendanceId || `ATT-${Date.now()}`,
-                  teamId: (resJson.data.team && resJson.data.team.teamId) || payload.teamId,
-                  teamName: (resJson.data.team && resJson.data.team.teamName) || payload.teamId,
-                  status: "present",
-                  checkInTime: resJson.data.checkInTime || new Date().toLocaleString(),
-                  markedBy: payload.markedBy || "Organizer Desk"
-                });
-                localStorage.setItem(CONFIG.STORAGE_KEYS.ATTENDANCE, JSON.stringify(att));
-              }
-            }
             return resJson.data;
           } else {
-            console.error("Google Cloud Database Error:", resJson.error);
-            throw new Error(resJson.error || "Google Cloud Database Error");
+            const errObj = resJson.error || "Execution Error";
+            const errMsg = typeof errObj === "object" ? (errObj.message || JSON.stringify(errObj)) : errObj;
+            throw new Error(errMsg);
           }
         }
       } catch (err) {
         clearTimeout(timeoutId);
-        console.warn("Direct Google Cloud request fallback:", err.message);
-        // If it's a specific validation error from Google Cloud, propagate it directly!
-        if (err.message && !err.message.includes("Failed to fetch") && !err.message.includes("NetworkError") && !err.message.includes("aborted")) {
+        // If it's a specific validation/auth error from server, throw directly
+        if (!err.message.includes("Failed to fetch") && !err.message.includes("NetworkError") && !err.message.includes("aborted")) {
           throw err;
         }
       }
     }
 
+    // Local state fallback for offline dev mode
     return this.handleLocalAction(action, payload);
   },
 
@@ -264,6 +219,8 @@ const API = {
         teams[index].projectTitle = data.projectTitle || teams[index].projectTitle;
         teams[index].domain = data.domain || teams[index].domain;
         teams[index].problemStatement = data.problemStatement || teams[index].problemStatement;
+        teams[index].githubUrl = data.githubUrl || teams[index].githubUrl || "";
+        teams[index].demoUrl = data.demoUrl || teams[index].demoUrl || "";
         teams[index].problemSubmitted = true;
         teams[index].submissionLocked = true;
 
@@ -418,11 +375,19 @@ const API = {
           throw new Error(`You have already submitted an evaluation for team ${data.teamName} in this round.`);
         }
 
-        const c1 = parseFloat(data.c1) || 0;
-        const c2 = parseFloat(data.c2) || 0;
-        const c3 = parseFloat(data.c3) || 0;
-        const c4 = parseFloat(data.c4) || 0;
-        const total = c1 + c2 + c3 + c4;
+        const c1 = parseFloat(data.c1);
+        const c2 = parseFloat(data.c2);
+        const c3 = parseFloat(data.c3);
+        const c4 = parseFloat(data.c4);
+
+        if (isNaN(c1) || c1 < 0 || c1 > 25 || isNaN(c2) || c2 < 0 || c2 > 25 || isNaN(c3) || c3 < 0 || c3 > 25 || isNaN(c4) || c4 < 0 || c4 > 25) {
+          throw new Error("Invalid scoring marks! Each criterion must be a number between 0 and 25.");
+        }
+
+        const total = parseFloat((c1 + c2 + c3 + c4).toFixed(2));
+        if (total > 100) {
+          throw new Error("Total score cannot exceed 100 marks per round.");
+        }
         const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
 
         const newEval = {
@@ -485,7 +450,12 @@ const API = {
           };
         });
 
-        list.sort((a, b) => b.grandTotal - a.grandTotal);
+        list.sort((a, b) => {
+          if (b.grandTotal !== a.grandTotal) return b.grandTotal - a.grandTotal;
+          if (b.round2 !== a.round2) return b.round2 - a.round2;
+          if (b.round1 !== a.round1) return b.round1 - a.round1;
+          return a.teamName.localeCompare(b.teamName);
+        });
 
         list.forEach((item, idx) => {
           item.rank = idx + 1;

@@ -258,8 +258,9 @@
         document.getElementById('certProject').textContent = `"${team.projectTitle || 'Autonomous Innovation System'}"`;
         document.getElementById('certVerificationId').textContent = certId;
 
-        // Render Verification QR Code on certificate
-        const verifyUrl = window.location.href;
+        // Render Verification QR Code pointing directly to public verify.html
+        const origin = window.location.origin + window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/'));
+        const verifyUrl = `${origin}/verify.html?id=${encodeURIComponent(certId)}`;
         Utils.renderQrCode('certQrCodeCanvas', verifyUrl, 75, 75);
       } catch (err) {
         console.error(err);
@@ -267,8 +268,11 @@
     });
 
     function copyCertLink() {
-      navigator.clipboard.writeText(window.location.href).then(() => {
-        alert("✓ Certificate verification link copied to clipboard!");
+      const certId = document.getElementById('certVerificationId').textContent;
+      const origin = window.location.origin + window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/'));
+      const verifyUrl = `${origin}/verify.html?id=${encodeURIComponent(certId)}`;
+      navigator.clipboard.writeText(verifyUrl).then(() => {
+        alert("✓ Public verification link copied to clipboard!\n" + verifyUrl);
       });
     }
   </script>

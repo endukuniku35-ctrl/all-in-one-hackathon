@@ -27,8 +27,18 @@ const Judge = {
     try {
       const teams = await API.request('getTeams');
       const configs = await API.request('getRoundConfig');
-      const r1Evals = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.EVALUATIONS_R1) || '[]');
-      const r2Evals = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.EVALUATIONS_R2) || '[]');
+      const assignments = JSON.parse(localStorage.getItem('ht_judge_assignments') || '{}');
+      const assignedTeamIds = Object.keys(assignments).filter(tid => assignments[tid] && assignments[tid].includes(session.userId));
+      
+      let displayTeams = teams;
+      if (assignedTeamIds.length > 0) {
+        displayTeams = teams.filter(t => assignedTeamIds.includes(t.teamId));
+        const assignBadge = document.getElementById('assignedFilterNotice');
+        if (assignBadge) {
+          assignBadge.style.display = 'inline-block';
+          assignBadge.textContent = `Assigned Cohort: ${displayTeams.length} of ${teams.length} Teams`;
+        }
+      }
 
       const isR1Active = configs.find(c => c.roundId === 'round1')?.status === 'active';
       const isR2Active = configs.find(c => c.roundId === 'round2')?.status === 'active';
@@ -45,10 +55,13 @@ const Judge = {
         pillR2.textContent = isR2Active ? 'Active' : 'Locked';
       }
 
+      const r1Evals = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.EVALUATIONS_R1) || '[]');
+      const r2Evals = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.EVALUATIONS_R2) || '[]');
+
       const tbody = document.getElementById('judgeTeamsMatrixBody');
       if (!tbody) return;
 
-      tbody.innerHTML = teams.map(t => {
+      tbody.innerHTML = displayTeams.map(t => {
         const e1 = r1Evals.find(e => e.judgeId === session.userId && e.teamId === t.teamId);
         const e2 = r2Evals.find(e => e.judgeId === session.userId && e.teamId === t.teamId);
 
@@ -105,6 +118,26 @@ const Judge = {
       document.getElementById('evalProjectTitle').textContent = team.projectTitle || 'Pending Statement';
       document.getElementById('evalDomain').textContent = team.domain || 'TBD';
       document.getElementById('evalProblemStatement').textContent = team.problemStatement || 'Pending Release';
+
+      const ghLink = document.getElementById('evalGithubLink');
+      if (ghLink) {
+        if (team.githubUrl) {
+          ghLink.href = team.githubUrl;
+          ghLink.style.display = 'inline-flex';
+        } else {
+          ghLink.style.display = 'none';
+        }
+      }
+
+      const demoLink = document.getElementById('evalDemoLink');
+      if (demoLink) {
+        if (team.demoUrl) {
+          demoLink.href = team.demoUrl;
+          demoLink.style.display = 'inline-flex';
+        } else {
+          demoLink.style.display = 'none';
+        }
+      }
 
       const configs = await API.request('getRoundConfig');
       const roundConfig = configs.find(c => c.roundId === roundId);

@@ -11,8 +11,11 @@ const CONFIG = {
   VERSION: "3.0.0",
   ORGANIZATION: "Synora Innovation & Tech Council",
   
+  // Mode: "production" enforces Google Apps Script API calls; "development" allows local sandbox
+  MODE: "production",
+
   // Google Apps Script Web App API URL
-  API_URL: "https://script.google.com/macros/s/AKfycbxc6VUjIb8OnheNU0QHBfVzjhsz6jbr40vd3Fx4B0BaFuzQuEkzKJiKSCqz66bV7Veb/exec", 
+  API_URL: "https://script.google.com/macros/s/AKfycbwFQRu5P3_lZ1n6FFfCAr7TH6EyAQiy1CCiVTAKQmwn1qlo_BCN_U0q2WObrT250WYM/exec", 
 
   // Exactly Two Independent Judging Rounds (100 Marks Each, Total 200)
   ROUNDS: {

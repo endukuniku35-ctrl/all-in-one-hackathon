@@ -3,104 +3,216 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Team Live Pass &amp; Portal — HackTrack | Synora'26</title>
+  <title>Team Command Center — HackTrack | Synora'26</title>
   
   <!-- CSS Dependencies -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
   <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/dashboard.css">
   <link rel="stylesheet" href="css/forms.css">
   <link rel="stylesheet" href="css/tables.css">
   <link rel="stylesheet" href="css/responsive.css">
+
+  <style>
+    .pipeline-step {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      position: relative;
+      flex: 1;
+      text-align: center;
+    }
+    .pipeline-dot {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: #1E293B;
+      border: 2px solid #475569;
+      color: #94A3B8;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      font-size: 0.85rem;
+      margin-bottom: 6px;
+      z-index: 2;
+    }
+    .pipeline-step.completed .pipeline-dot {
+      background: #10B981;
+      border-color: #10B981;
+      color: #FFFFFF;
+    }
+    .pipeline-step.active .pipeline-dot {
+      background: #2563EB;
+      border-color: #38BDF8;
+      color: #FFFFFF;
+      box-shadow: 0 0 12px rgba(56, 189, 248, 0.6);
+    }
+    .pipeline-step.locked .pipeline-dot {
+      background: #0F172A;
+      border-color: #334155;
+      color: #475569;
+    }
+    .pipeline-track {
+      position: absolute;
+      top: 16px;
+      left: 50%;
+      width: 100%;
+      height: 2px;
+      background: #334155;
+      z-index: 1;
+    }
+    .pipeline-step:last-child .pipeline-track {
+      display: none;
+    }
+    .pipeline-label {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: #94A3B8;
+    }
+    .pipeline-step.completed .pipeline-label { color: #10B981; }
+    .pipeline-step.active .pipeline-label { color: #38BDF8; font-weight: 700; }
+  </style>
 </head>
-<body class="bg-main py-4">
+<body class="bg-main">
 
-  <!-- Floating Theme Toggle -->
-  <div class="position-absolute top-0 end-0 m-3">
-    <button class="theme-toggle-btn" onclick="Utils.toggleTheme()" title="Toggle Dark/Light Mode">
-      <i class="bi bi-moon-stars-fill" id="theme-toggle-icon"></i>
-    </button>
-  </div>
-
-  <div class="container" style="max-width: 780px;">
-
-    <!-- Top Header Branding -->
-    <div class="text-center mb-4">
-      <div class="d-inline-flex align-items-center justify-content-center mb-2" style="width:46px; height:46px; background:linear-gradient(135deg, #2563EB, #06B6D4); border-radius:12px; color:#fff; font-size:1.4rem; font-weight:bold;">
-        ⚙
+  <!-- Mobile Topbar -->
+  <header class="py-3 border-bottom bg-card shadow-xs">
+    <div class="container d-flex justify-content-between align-items-center">
+      <div class="d-flex align-items-center gap-2">
+        <div class="brand-icon" style="width:36px; height:36px; background:linear-gradient(135deg, #2563EB, #06B6D4); border-radius:8px; display:flex; align-items:center; justify-content:center; color:#fff; font-weight:bold;">⚙</div>
+        <div>
+          <span class="fw-bold fs-5 text-primary">HackTrack</span>
+          <span class="badge bg-primary ms-1">Synora'26 Team Pass</span>
+        </div>
       </div>
-      <h3 class="fw-bold mb-0 text-primary">HackTrack Pass</h3>
-      <p class="small text-secondary mb-1">Synora'26 Official Participant Team Portal</p>
-      <div class="d-inline-flex align-items-center gap-2 px-3 py-1 rounded-pill bg-card border shadow-xs">
-        <span class="live-indicator"><span class="pulse-dot"></span> VERIFIED TEAM PASS</span>
-        <span class="small mono text-muted" id="portalTokenHash">HT26-SEC-...</span>
+      <div class="d-flex align-items-center gap-2">
+        <button class="theme-toggle-btn" onclick="Utils.toggleTheme()"><i class="bi bi-moon-stars-fill" id="theme-toggle-icon"></i></button>
+        <a href="index.html" class="btn btn-outline-light btn-sm"><i class="bi bi-house"></i> Home</a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Container -->
+  <div class="container py-4" style="max-width: 820px;">
+
+    <!-- 1. Hackathon Pipeline Progress Tracker -->
+    <div class="ht-card mb-4 p-3">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h6 class="fw-bold text-uppercase text-secondary small mb-0"><i class="bi bi-activity"></i> Hackathon Lifecycle Pipeline</h6>
+        <span class="ht-badge badge-active" id="pipelineCurrentStageBadge">Stage: Active</span>
+      </div>
+
+      <div class="d-flex justify-content-between position-relative pt-1 pb-2">
+        <div class="pipeline-step completed" id="pipe-reg">
+          <div class="pipeline-track"></div>
+          <div class="pipeline-dot"><i class="bi bi-check-lg"></i></div>
+          <div class="pipeline-label">Registered</div>
+        </div>
+        <div class="pipeline-step completed" id="pipe-att">
+          <div class="pipeline-track"></div>
+          <div class="pipeline-dot"><i class="bi bi-qr-code-scan"></i></div>
+          <div class="pipeline-label">Check-in</div>
+        </div>
+        <div class="pipeline-step" id="pipe-prob">
+          <div class="pipeline-track"></div>
+          <div class="pipeline-dot"><i class="bi bi-file-earmark-code"></i></div>
+          <div class="pipeline-label">Problem Stmt</div>
+        </div>
+        <div class="pipeline-step" id="pipe-sub">
+          <div class="pipeline-track"></div>
+          <div class="pipeline-dot"><i class="bi bi-cloud-upload"></i></div>
+          <div class="pipeline-label">Submission</div>
+        </div>
+        <div class="pipeline-step" id="pipe-r1">
+          <div class="pipeline-track"></div>
+          <div class="pipeline-dot">R1</div>
+          <div class="pipeline-label">Pitch (100)</div>
+        </div>
+        <div class="pipeline-step" id="pipe-r2">
+          <div class="pipeline-track"></div>
+          <div class="pipeline-dot">R2</div>
+          <div class="pipeline-label">Demo (100)</div>
+        </div>
+        <div class="pipeline-step" id="pipe-cert">
+          <div class="pipeline-dot">🎓</div>
+          <div class="pipeline-label">Certificates</div>
+        </div>
       </div>
     </div>
 
-    <!-- 1. Team & Member Details Card (Always Visible) -->
-    <div class="ht-card mb-4 border-primary">
+    <!-- 2. Team Master Dossier & Member Roster (Verified Locked View) -->
+    <div class="ht-card mb-4" style="border-left: 5px solid #06B6D4;">
       <div class="ht-card-header">
         <div>
-          <span class="ht-badge badge-primary mb-1">Registered Squad</span>
-          <h4 class="fw-bold mb-0 text-primary" id="portalTeamName">Loading Team...</h4>
-          <span class="small text-muted" id="portalCollege">College • Department</span>
-        </div>
-        <div class="text-end">
-          <span class="team-id-badge fs-6" id="portalTeamId">HT2026001</span>
-          <div class="mt-2">
-            <span class="ht-badge badge-present" id="portalAttBadge">
-              <i class="bi bi-check-circle-fill"></i> Checked In
-            </span>
+          <div class="d-flex align-items-center gap-2">
+            <h3 class="fw-bold mb-0 text-white" id="portalTeamName">Team Name</h3>
+            <span class="badge bg-primary fs-6 mono" id="portalTeamId">HT2026001</span>
           </div>
+          <div class="small text-secondary mt-1" id="portalCollege">College • Department</div>
+        </div>
+        <span class="ht-badge badge-active"><i class="bi bi-patch-check-fill"></i> Verified Roster</span>
+      </div>
+
+      <div class="p-3">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <span class="text-uppercase text-secondary small fw-bold">Official Member Passports</span>
+          <span class="small text-muted mono">Token: <code id="portalTokenHash" class="text-info">...</code></span>
+        </div>
+
+        <div class="list-group list-group-flush mb-0" id="portalMembersList">
+          <!-- Injected dynamically -->
         </div>
       </div>
-
-      <!-- Member Roster List -->
-      <h6 class="fw-bold text-muted text-uppercase small mb-3">Official Team Member Roster</h6>
-      <div class="list-group mb-2" id="portalMembersList">
-        <!-- Dynamically Populated -->
-      </div>
     </div>
 
-    <!-- 2. Problem Statement & Project Submission Module (Dynamic State) -->
+    <!-- 3. Dynamic Problem Statement & Project Submission Module -->
     <div class="ht-card mb-4" id="portalProblemModule">
-      <!-- Dynamically Rendered: Locked, Submission Form, or Submitted Receipt -->
+      <!-- Dynamic Form / Locked Receipt -->
     </div>
 
-    <!-- 3. Judging Rounds Status Strip (2 Rounds) -->
-    <div class="ht-card mb-4">
+    <!-- 4. Jury Evaluation Score Cards (200 Max Total) -->
+    <div class="ht-card mb-4" id="portalEvaluationScoreModule">
       <div class="ht-card-header">
         <div class="ht-card-title">
-          <i class="bi bi-award text-primary"></i> Jury Evaluation Rounds (200 Total Marks)
+          <i class="bi bi-trophy text-warning"></i> Jury Evaluation Breakdown (200 Max Total)
         </div>
-        <span class="small text-muted">2 Independent Tiers</span>
+        <span class="small text-muted">2 Independent Rounds</span>
       </div>
 
-      <div class="row g-3 text-center">
-        <div class="col-6">
-          <div class="p-3 bg-subtle rounded border">
-            <div class="small fw-bold text-muted text-uppercase mb-1">Round 1 (100 Marks)</div>
-            <div class="small text-secondary mb-2">Innovation, Pitch &amp; Ideation</div>
-            <span class="ht-badge badge-active" id="portalR1Badge">Active</span>
+      <div class="p-3">
+        <div class="row g-3 text-center mb-3">
+          <div class="col-6">
+            <div class="p-3 bg-subtle rounded border">
+              <div class="small fw-bold text-muted text-uppercase mb-1">Round 1 (Pitch - /100)</div>
+              <div class="fs-4 fw-bold font-monospace text-info" id="teamScoreR1Display">- / 100</div>
+              <span class="ht-badge badge-locked mt-1" id="portalR1Badge">Locked</span>
+            </div>
+          </div>
+          <div class="col-6">
+            <div class="p-3 bg-subtle rounded border">
+              <div class="small fw-bold text-muted text-uppercase mb-1">Round 2 (Demo - /100)</div>
+              <div class="fs-4 fw-bold font-monospace text-info" id="teamScoreR2Display">- / 100</div>
+              <span class="ht-badge badge-locked mt-1" id="portalR2Badge">Locked</span>
+            </div>
           </div>
         </div>
-        <div class="col-6">
-          <div class="p-3 bg-subtle rounded border">
-            <div class="small fw-bold text-muted text-uppercase mb-1">Round 2 (100 Marks)</div>
-            <div class="small text-secondary mb-2">Prototype &amp; Working Demo</div>
-            <span class="ht-badge badge-active" id="portalR2Badge">Active</span>
-          </div>
+
+        <div class="p-3 bg-subtle rounded border text-center">
+          <div class="small text-muted text-uppercase fw-bold">Combined Grand Standing</div>
+          <div class="display-6 fw-bold font-monospace text-warning mt-1" id="teamGrandTotalDisplay">0.00 <span class="fs-5 text-muted">/ 200</span></div>
         </div>
       </div>
     </div>
 
-    <!-- 4. Certificates Release Module -->
+    <!-- 5. Certificates Release Module -->
     <div id="portalCertificatesModule"></div>
 
     <!-- Footer -->
     <div class="text-center py-3 text-muted small">
-      ⚙ <b>HackTrack | Synora'26</b> • Dynamic Participant Portal<br>
-      For team modifications or technical assistance, contact the Organizer Desk.
+      ⚙ <b>HackTrack | Synora'26</b> • Dynamic Participant Command Center<br>
+      For team modifications, approach the Organizer Desk.
     </div>
 
   </div>
@@ -144,29 +256,38 @@
       // Render Roster
       const roster = document.getElementById('portalMembersList');
       roster.innerHTML = `
-        <div class="list-group-item d-flex justify-content-between align-items-center">
+        <div class="list-group-item bg-transparent d-flex justify-content-between align-items-center border-secondary px-0">
           <div>
-            <span class="badge bg-primary me-2">Leader</span> <b>${team.leaderName}</b>
+            <span class="badge bg-primary me-2">Leader</span> <b class="text-white">${team.leaderName}</b>
             <div class="small text-muted">${team.leaderEmail} • ${team.leaderPhone || '-'}</div>
           </div>
           <span class="ht-badge badge-active">Active</span>
         </div>
         ${team.member2Name ? `
-          <div class="list-group-item">
-            <span class="badge bg-secondary me-2">Member 2</span> <b>${team.member2Name}</b>
-            <div class="small text-muted">${team.member2Email || '-'}</div>
+          <div class="list-group-item bg-transparent d-flex justify-content-between align-items-center border-secondary px-0">
+            <div>
+              <span class="badge bg-secondary me-2">Member 2</span> <b class="text-white">${team.member2Name}</b>
+              <div class="small text-muted">${team.member2Email || '-'}</div>
+            </div>
+            <span class="ht-badge badge-active">Active</span>
           </div>
         ` : ''}
         ${team.member3Name ? `
-          <div class="list-group-item">
-            <span class="badge bg-secondary me-2">Member 3</span> <b>${team.member3Name}</b>
-            <div class="small text-muted">${team.member3Email || '-'}</div>
+          <div class="list-group-item bg-transparent d-flex justify-content-between align-items-center border-secondary px-0">
+            <div>
+              <span class="badge bg-secondary me-2">Member 3</span> <b class="text-white">${team.member3Name}</b>
+              <div class="small text-muted">${team.member3Email || '-'}</div>
+            </div>
+            <span class="ht-badge badge-active">Active</span>
           </div>
         ` : ''}
         ${team.member4Name ? `
-          <div class="list-group-item">
-            <span class="badge bg-secondary me-2">Member 4</span> <b>${team.member4Name}</b>
-            <div class="small text-muted">${team.member4Email || '-'}</div>
+          <div class="list-group-item bg-transparent d-flex justify-content-between align-items-center border-secondary px-0">
+            <div>
+              <span class="badge bg-secondary me-2">Member 4</span> <b class="text-white">${team.member4Name}</b>
+              <div class="small text-muted">${team.member4Email || '-'}</div>
+            </div>
+            <span class="ht-badge badge-active">Active</span>
           </div>
         ` : ''}
       `;
@@ -183,102 +304,86 @@
       document.getElementById('portalR2Badge').className = `ht-badge ${isR2Active ? 'badge-active' : 'badge-locked'}`;
       document.getElementById('portalR2Badge').textContent = isR2Active ? 'Active' : 'Locked';
 
-      // Check Certificate Release Status
-      const certContainer = document.getElementById('portalCertificatesModule');
-      if (certContainer) {
-        try {
-          const certs = await API.request('getCertificates');
-          const teamCerts = certs.filter(c => c.teamId === team.teamId);
-          const settings = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.SETTINGS) || '{}');
-          const isCertReleased = settings.isCertificateSystemEnabled || teamCerts.length > 0;
+      // Update Pipeline Progress State
+      updatePipelineUI(team, isProblemReleased, isR1Active, isR2Active);
 
-          if (isCertReleased) {
-            certContainer.innerHTML = `
-              <div class="ht-card mb-4 border-success">
-                <div class="ht-card-header bg-success-subtle p-3 rounded-top">
-                  <div class="ht-card-title text-success">
-                    <i class="bi bi-award-fill"></i> Official Team Certificates Released!
-                  </div>
-                  <span class="ht-badge badge-active">Available for Download</span>
-                </div>
-                <div class="p-3">
-                  <p class="small text-secondary mb-3">Congratulations on completing Synora'26! Official participation and merit certificates are now ready for download, printing, and online verification.</p>
-                  <div class="d-grid gap-2">
-                    <a href="certificate.html?teamId=${team.teamId}&name=${encodeURIComponent(team.leaderName)}&role=Team Leader" target="_blank" class="btn btn-outline-primary d-flex justify-content-between align-items-center">
-                      <span>👑 <b>${team.leaderName}</b> (Team Leader)</span>
-                      <span><i class="bi bi-download"></i> View &amp; Print Certificate</span>
-                    </a>
-                    ${team.member2Name ? `
-                      <a href="certificate.html?teamId=${team.teamId}&name=${encodeURIComponent(team.member2Name)}&role=Core Team Member" target="_blank" class="btn btn-outline-primary d-flex justify-content-between align-items-center">
-                        <span>👤 <b>${team.member2Name}</b></span>
-                        <span><i class="bi bi-download"></i> View &amp; Print Certificate</span>
-                      </a>
-                    ` : ''}
-                    ${team.member3Name ? `
-                      <a href="certificate.html?teamId=${team.teamId}&name=${encodeURIComponent(team.member3Name)}&role=Core Team Member" target="_blank" class="btn btn-outline-primary d-flex justify-content-between align-items-center">
-                        <span>👤 <b>${team.member3Name}</b></span>
-                        <span><i class="bi bi-download"></i> View &amp; Print Certificate</span>
-                      </a>
-                    ` : ''}
-                    ${team.member4Name ? `
-                      <a href="certificate.html?teamId=${team.teamId}&name=${encodeURIComponent(team.member4Name)}&role=Core Team Member" target="_blank" class="btn btn-outline-primary d-flex justify-content-between align-items-center">
-                        <span>👤 <b>${team.member4Name}</b></span>
-                        <span><i class="bi bi-download"></i> View &amp; Print Certificate</span>
-                      </a>
-                    ` : ''}
-                  </div>
-                </div>
-              </div>
-            `;
-          } else {
-            certContainer.innerHTML = `
-              <div class="ht-card mb-4">
-                <div class="p-3 text-center">
-                  <div class="text-secondary mb-1" style="font-size:1.5rem;"><i class="bi bi-award"></i></div>
-                  <h6 class="fw-bold mb-1">Official Certificates: Pending Release</h6>
-                  <p class="small text-muted mb-0">Participation and achievement credentials will be unlocked here once results and winners are declared by organizers.</p>
-                </div>
-              </div>
-            `;
-          }
-        } catch (e) {
-          console.error("Certificate check error", e);
+      // Render Score Breakdown
+      renderScoreModule(team);
+
+      // Render Certificate Module
+      renderCertificateModule(team);
+
+      // Render Problem & Project Submission Module
+      renderProblemModule(team, isProblemReleased);
+    }
+
+    function updatePipelineUI(team, isProblemReleased, isR1Active, isR2Active) {
+      const isSubmitted = team.submissionLocked || team.problemSubmitted;
+      if (isProblemReleased) document.getElementById('pipe-prob')?.classList.add('completed');
+      if (isSubmitted) document.getElementById('pipe-sub')?.classList.add('completed');
+      if (isR1Active) document.getElementById('pipe-r1')?.classList.add('active');
+      if (isR2Active) document.getElementById('pipe-r2')?.classList.add('active');
+    }
+
+    async function renderScoreModule(team) {
+      try {
+        const leaderboard = await API.request('getLeaderboard');
+        const teamScore = leaderboard.find(t => t.teamId === team.teamId);
+        if (teamScore) {
+          document.getElementById('teamScoreR1Display').textContent = `${teamScore.round1} / 100`;
+          document.getElementById('teamScoreR2Display').textContent = `${teamScore.round2} / 100`;
+          document.getElementById('teamGrandTotalDisplay').innerHTML = `${teamScore.grandTotal} <span class="fs-5 text-muted">/ 200</span>`;
         }
-      }
+      } catch (e) {}
+    }
 
+    function renderProblemModule(team, isProblemReleased) {
       const problemContainer = document.getElementById('portalProblemModule');
+      const isSubmitted = team.submissionLocked || team.problemSubmitted;
 
-      // State 1: Already Submitted & Locked for Team
-      if (team.submissionLocked || team.problemSubmitted) {
+      // State 1: Locked Receipt
+      if (isSubmitted) {
         problemContainer.innerHTML = `
           <div class="ht-card-header bg-success-subtle p-3 rounded-top">
             <div class="ht-card-title text-success">
-              <i class="bi bi-lock-fill"></i> Problem Statement Locked for Team
+              <i class="bi bi-lock-fill"></i> Project &amp; Problem Statement Locked in Cloud
             </div>
-            <span class="ht-badge badge-active">Submitted &amp; Immutable</span>
+            <span class="ht-badge badge-active">Immutable Receipt</span>
           </div>
           <div class="p-3">
-            <div class="mb-2">
+            <div class="mb-3">
               <div class="small fw-bold text-muted text-uppercase">Project Title</div>
-              <div class="fw-bold fs-6 text-primary">${team.projectTitle}</div>
+              <h5 class="fw-bold text-primary mb-1">${team.projectTitle || 'Flagship Prototype'}</h5>
+              <span class="badge bg-info text-dark">${team.domain || 'AI/ML'}</span>
             </div>
-            <div class="mb-2">
-              <span class="domain-badge">${team.domain}</span>
-            </div>
-            <div class="p-3 bg-subtle rounded border">
-              <div class="small fw-bold text-muted text-uppercase mb-1">Problem Statement</div>
+            <div class="p-3 bg-subtle rounded border mb-3">
+              <div class="small fw-bold text-muted text-uppercase mb-1">Problem Statement Summary</div>
               <p class="mb-0 text-secondary">${team.problemStatement}</p>
             </div>
-            <div class="alert alert-info border-info small mt-3 mb-0">
+            <div class="row g-2 mb-3">
+              <div class="col-sm-6">
+                <div class="small text-muted fw-bold">GitHub Repository:</div>
+                <a href="${team.githubUrl || 'https://github.com'}" target="_blank" class="small text-truncate d-block text-info">
+                  <i class="bi bi-github"></i> ${team.githubUrl || 'https://github.com/team-repo'}
+                </a>
+              </div>
+              <div class="col-sm-6">
+                <div class="small text-muted fw-bold">Live Demo / Pitch:</div>
+                <a href="${team.demoUrl || '#'}" target="_blank" class="small text-truncate d-block text-info">
+                  <i class="bi bi-box-arrow-up-right"></i> ${team.demoUrl || 'Live Prototype Link'}
+                </a>
+              </div>
+            </div>
+            <div class="alert alert-info border-info small mb-0">
               <i class="bi bi-info-circle-fill me-1"></i>
-              <b>One-Time Access Policy:</b> Your submission is locked. Only logged-in Organizers or Administrators can modify project details.
+              <b>One-Time Access Policy:</b> Submission is locked. Only logged-in Organizers or Administrators can modify project details via event desk.
             </div>
           </div>
         `;
         return;
       }
 
-      // State 2: Problem Statements Phase NOT Released Yet
+      // State 2: Release Pending
       if (!isProblemReleased) {
         problemContainer.innerHTML = `
           <div class="p-4 text-center">
@@ -292,12 +397,12 @@
         return;
       }
 
-      // State 3: Problem Statements Released & Unlocked for One-Time Submission!
+      // State 3: Unlocked for One-Time Submission
       problemContainer.innerHTML = `
         <div class="ht-card-header">
           <div>
             <div class="ht-card-title text-primary">
-              <i class="bi bi-unlock-fill"></i> Select &amp; Lock Your Problem Statement
+              <i class="bi bi-unlock-fill"></i> Select &amp; Lock Your Project Details
             </div>
             <p class="small text-muted mb-0">You have ONE-TIME ACCESS to submit. Once locked, this cannot be modified by the team.</p>
           </div>
@@ -305,17 +410,22 @@
         </div>
 
         <form id="teamProblemSubmitForm" class="p-3">
-          <div class="ht-form-group">
-            <label class="ht-label" for="portalSelectDomain">Select Project Domain <span class="required">*</span></label>
-            <select id="portalSelectDomain" class="ht-select" required>
-              <option value="">Choose Domain...</option>
-              ${CONFIG.DOMAINS.map(d => `<option value="${d}">${d}</option>`).join('')}
-            </select>
-          </div>
-
-          <div class="ht-form-group">
-            <label class="ht-label" for="portalProjectTitleInput">Project Title <span class="required">*</span></label>
-            <input type="text" id="portalProjectTitleInput" class="ht-input" placeholder="e.g. Autonomous AI Diagnostics Engine" required>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <div class="ht-form-group">
+                <label class="ht-label" for="portalSelectDomain">Select Project Domain <span class="required">*</span></label>
+                <select id="portalSelectDomain" class="ht-select" required>
+                  <option value="">Choose Domain...</option>
+                  ${CONFIG.DOMAINS.map(d => `<option value="${d}">${d}</option>`).join('')}
+                </select>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="ht-form-group">
+                <label class="ht-label" for="portalProjectTitleInput">Project Title <span class="required">*</span></label>
+                <input type="text" id="portalProjectTitleInput" class="ht-input" placeholder="e.g. Autonomous Oncology Vision System" required>
+              </div>
+            </div>
           </div>
 
           <div class="ht-form-group">
@@ -324,57 +434,133 @@
               <option value="">-- Choose From Released Problem Statements --</option>
               ${CONFIG.SAMPLE_PROBLEM_STATEMENTS.map(ps => `<option value="${ps.id}: ${ps.title}">${ps.id}: ${ps.title} (${ps.domain})</option>`).join('')}
             </select>
-            <textarea id="portalProblemInput" class="ht-textarea" placeholder="Or write your tailored problem statement description..." required></textarea>
+            <textarea id="portalProblemInput" class="ht-textarea" rows="3" placeholder="Or write your tailored problem statement description..." required></textarea>
+          </div>
+
+          <div class="row g-3">
+            <div class="col-md-6">
+              <div class="ht-form-group">
+                <label class="ht-label" for="portalGithubInput">GitHub Repository URL</label>
+                <input type="url" id="portalGithubInput" class="ht-input" placeholder="https://github.com/your-team/project">
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="ht-form-group">
+                <label class="ht-label" for="portalDemoInput">Live Demo / Pitch Deck Link</label>
+                <input type="url" id="portalDemoInput" class="ht-input" placeholder="https://your-demo.app or Figma link">
+              </div>
+            </div>
           </div>
 
           <div class="d-flex justify-content-end mt-3">
             <button type="submit" class="btn-ht-primary fs-6 px-4 py-2" id="submitProblemLockBtn">
-              <i class="bi bi-lock-fill"></i> Lock In Problem Statement
+              <i class="bi bi-lock-fill"></i> Lock In Project Submission
             </button>
           </div>
         </form>
       `;
 
-      // Attach Submission Handler
       document.getElementById('teamProblemSubmitForm').addEventListener('submit', async (e) => {
         e.preventDefault();
         const domain = document.getElementById('portalSelectDomain').value;
         const projectTitle = document.getElementById('portalProjectTitleInput').value.trim();
         const problemStatement = document.getElementById('portalProblemInput').value.trim();
+        const githubUrl = document.getElementById('portalGithubInput')?.value.trim() || '';
+        const demoUrl = document.getElementById('portalDemoInput')?.value.trim() || '';
         const btn = document.getElementById('submitProblemLockBtn');
 
         if (!domain || !projectTitle || !problemStatement) {
-          Utils.showToast("Please fill in all mandatory fields.", "warning");
+          Utils.showToast("Please fill in all mandatory fields (*)", "warning");
           return;
         }
 
-        if (!confirm("Are you sure? Once submitted, your problem statement will be permanently locked for the team.")) {
-          return;
-        }
+        if (!confirm("Are you sure? Once submitted, your project details will be permanently locked for the team.")) return;
 
         try {
           btn.disabled = true;
-          btn.innerHTML = `<span class="spinner-border spinner-border-sm me-2"></span> Locking In...`;
+          btn.innerHTML = `<span class="spinner-border spinner-border-sm me-2"></span> Locking in Google Cloud...`;
 
           await API.request('submitTeamProblemDetails', {
             teamId: team.teamId,
             token: team.qrCodeToken,
             domain,
             projectTitle,
-            problemStatement
+            problemStatement,
+            githubUrl,
+            demoUrl
           });
 
-          Utils.showToast("✓ Problem statement locked in successfully!", "success");
+          Utils.showToast("✓ Project details locked in Google Cloud successfully!", "success");
           setTimeout(() => {
             window.location.reload();
           }, 1000);
-
         } catch (err) {
           btn.disabled = false;
-          btn.innerHTML = `<i class="bi bi-lock-fill"></i> Lock In Problem Statement`;
+          btn.innerHTML = `<i class="bi bi-lock-fill"></i> Lock In Project Submission`;
           Utils.showToast(err.message, "danger");
         }
       });
+    }
+
+    async function renderCertificateModule(team) {
+      const certContainer = document.getElementById('portalCertificatesModule');
+      if (!certContainer) return;
+
+      try {
+        const certs = await API.request('getCertificates');
+        const settings = await API.request('getSettings');
+        const isCertReleased = settings.isCertificateSystemEnabled || certs.some(c => c.teamId === team.teamId && c.status === "RELEASED");
+
+        if (isCertReleased) {
+          certContainer.innerHTML = `
+            <div class="ht-card mb-4 border-success">
+              <div class="ht-card-header bg-success-subtle p-3 rounded-top">
+                <div class="ht-card-title text-success">
+                  <i class="bi bi-award-fill"></i> Official Team Certificates Released!
+                </div>
+                <span class="ht-badge badge-active">Available for Download</span>
+              </div>
+              <div class="p-3">
+                <p class="small text-secondary mb-3">Congratulations on completing Synora'26! Official participation and merit certificates are now ready for download, printing, and online verification.</p>
+                <div class="d-grid gap-2">
+                  <a href="certificate.html?teamId=${team.teamId}&name=${encodeURIComponent(team.leaderName)}&role=Team Leader" target="_blank" class="btn btn-outline-primary d-flex justify-content-between align-items-center">
+                    <span>👑 <b>${team.leaderName}</b> (Team Leader)</span>
+                    <span><i class="bi bi-download"></i> View &amp; Print Certificate</span>
+                  </a>
+                  ${team.member2Name ? `
+                    <a href="certificate.html?teamId=${team.teamId}&name=${encodeURIComponent(team.member2Name)}&role=Core Team Member" target="_blank" class="btn btn-outline-primary d-flex justify-content-between align-items-center">
+                      <span>👤 <b>${team.member2Name}</b></span>
+                      <span><i class="bi bi-download"></i> View &amp; Print Certificate</span>
+                    </a>
+                  ` : ''}
+                  ${team.member3Name ? `
+                    <a href="certificate.html?teamId=${team.teamId}&name=${encodeURIComponent(team.member3Name)}&role=Core Team Member" target="_blank" class="btn btn-outline-primary d-flex justify-content-between align-items-center">
+                      <span>👤 <b>${team.member3Name}</b></span>
+                      <span><i class="bi bi-download"></i> View &amp; Print Certificate</span>
+                    </a>
+                  ` : ''}
+                  ${team.member4Name ? `
+                    <a href="certificate.html?teamId=${team.teamId}&name=${encodeURIComponent(team.member4Name)}&role=Core Team Member" target="_blank" class="btn btn-outline-primary d-flex justify-content-between align-items-center">
+                      <span>👤 <b>${team.member4Name}</b></span>
+                      <span><i class="bi bi-download"></i> View &amp; Print Certificate</span>
+                    </a>
+                  ` : ''}
+                </div>
+              </div>
+            </div>
+          `;
+        } else {
+          certContainer.innerHTML = `
+            <div class="ht-card mb-4">
+              <div class="p-3 text-center">
+                <div class="text-secondary mb-1" style="font-size:1.5rem;"><i class="bi bi-award"></i></div>
+                <h6 class="fw-bold mb-1">Official Certificates: Pending Release</h6>
+                <p class="small text-muted mb-0">Participation and achievement credentials will be unlocked here once results and winners are declared by organizers.</p>
+              </div>
+            </div>
+          `;
+        }
+      } catch (e) {}
     }
   </script>
 </body>
