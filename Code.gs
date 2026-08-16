@@ -36,6 +36,76 @@ var SECURITY = {
 };
 
 /**
+ * ==========================================================================
+ * High-Concurrency Cache & Atomic Lock Layer (200+ Concurrent User Support)
+ * ==========================================================================
+ */
+var CACHE_CONFIG = {
+  DEFAULT_TTL: 180,       // 3 minutes cache for read-heavy operations
+  SHORT_TTL: 60,          // 1 minute cache
+  MAX_VAL_SIZE: 95000     // 95KB safety margin (Apps Script limit is 100KB)
+};
+
+function getScriptCacheItem(key) {
+  try {
+    var cache = CacheService.getScriptCache();
+    var val = cache.get(key);
+    if (val) return JSON.parse(val);
+  } catch (e) {}
+  return null;
+}
+
+function setScriptCacheItem(key, data, ttl) {
+  try {
+    var cache = CacheService.getScriptCache();
+    var str = JSON.stringify(data);
+    if (str.length < CACHE_CONFIG.MAX_VAL_SIZE) {
+      cache.put(key, str, ttl || CACHE_CONFIG.DEFAULT_TTL);
+    }
+  } catch (e) {}
+}
+
+function invalidateScriptCache(keys) {
+  try {
+    var cache = CacheService.getScriptCache();
+    if (Array.isArray(keys)) {
+      cache.removeAll(keys);
+    } else if (typeof keys === "string") {
+      cache.remove(keys);
+    }
+  } catch (e) {}
+}
+
+function invalidateAllCaches() {
+  invalidateScriptCache([
+    "cached_raw_teams",
+    "cached_round_config",
+    "cached_settings",
+    "cached_leaderboard",
+    "cached_dashboard_stats",
+    "cached_users_list"
+  ]);
+}
+
+/**
+ * Executes a write operation with an atomic script-wide lock to prevent
+ * Google Sheets row write collisions during simultaneous multi-user submissions.
+ */
+function withScriptLock(fn, timeoutMs) {
+  var lock = LockService.getScriptLock();
+  timeoutMs = timeoutMs || 12000;
+  var hasLock = lock.tryLock(timeoutMs);
+  if (!hasLock) {
+    throw new Error("SERVER_BUSY: System is processing heavy concurrent requests. Please retry in a moment.");
+  }
+  try {
+    return fn();
+  } finally {
+    try { lock.releaseLock(); } catch(e) {}
+  }
+}
+
+/**
  * Robust Spreadsheet Resolver:
  * Binds automatically to active sheet or creates/fetches in Google Drive
  */
@@ -193,6 +263,14 @@ function handleAction(action, data, method) {
       auth(["ADMIN"]);
       return handleSettings(ss, "updateSettings", data);
 
+    case "getSystemHealth":
+      auth(["ADMIN"]);
+      return getSystemHealth(ss, data);
+
+    case "getScoreAuditLogs":
+      auth(["ADMIN"]);
+      return getScoreAuditLogs(ss, data);
+
     // ── ADMIN + ORGANIZER ──
     case "getDashboardStats":
       auth(["ADMIN", "ORGANIZER"]);
@@ -201,6 +279,10 @@ function handleAction(action, data, method) {
     case "registerTeam":
       auth(["ADMIN", "ORGANIZER"]);
       return registerTeam(ss, data);
+
+    case "bulkRegisterTeams":
+      auth(["ADMIN", "ORGANIZER"]);
+      return bulkRegisterTeams(ss, data);
 
     case "submitTeamProblemDetails":
       auth(["ADMIN", "ORGANIZER"]);
@@ -742,6 +824,87 @@ function initDatabase(ss) {
 
 /**
  * ==========================================================================
+ * Cryptographic Strong QR Engine (HMAC-SHA256 Signed & Tamper-Proof)
+ * ==========================================================================
+ */
+function getQrSigningKey() {
+  var props = PropertiesService.getScriptProperties();
+  var secret = props.getProperty("HACKTRACK_QR_HMAC_SECRET");
+  if (!secret) {
+    secret = "HT26-SECRET-" + Utilities.getUuid() + "-" + Utilities.getUuid();
+    props.setProperty("HACKTRACK_QR_HMAC_SECRET", secret);
+  }
+  return secret;
+}
+
+/**
+ * Generates an unforgeable, HMAC-SHA256 cryptographically signed QR token:
+ * Format: HT26-V2-<TEAM_ID>-<NONCE_16>-<TIMESTAMP_HEX>-<HMAC_16>
+ */
+function generateStrongQrToken(teamId) {
+  var teamClean = String(teamId || "").trim().toUpperCase();
+  var nonce = Utilities.getUuid().replace(/-/g, '').substring(0, 16).toUpperCase();
+  var ts = Math.floor(new Date().getTime() / 1000).toString(16).toUpperCase();
+  var payload = "HT26:" + teamClean + ":" + nonce + ":" + ts;
+  var secret = getQrSigningKey();
+
+  var sigBytes = Utilities.computeHmacSha256Signature(payload, secret);
+  var sigHex = sigBytes.map(function(b) {
+    return ('0' + (b & 0xFF).toString(16)).slice(-2);
+  }).join('').substring(0, 16).toUpperCase();
+
+  return "HT26-V2-" + teamClean + "-" + nonce + "-" + ts + "-" + sigHex;
+}
+
+/**
+ * Validates the cryptographic signature and format of a QR token.
+ * Returns true if valid, or throws if forged/tampered.
+ */
+function verifyQrTokenIntegrity(token) {
+  if (!token) throw new Error("INVALID_QR: QR token is required.");
+  token = String(token).trim();
+
+  // Backward compatibility check for legacy tokens
+  if (token.indexOf("HT26-V2-") !== 0) {
+    if (/^HT26-(SEC|ROT)-HT2026\d{3}-[A-F0-9]{16}$/i.test(token)) {
+      return true;
+    }
+    return false;
+  }
+
+  // Strong V2 format check: HT26-V2-<TEAM_ID>-<NONCE_16>-<TIMESTAMP_HEX>-<HMAC_16>
+  var parts = token.split("-");
+  if (parts.length < 6) {
+    throw new Error("INVALID_QR_FORMAT: Malformed cryptographic QR token.");
+  }
+
+  var prefix = parts[0];
+  var ver = parts[1];
+  var teamId = parts[2];
+  var nonce = parts[3];
+  var ts = parts[4];
+  var sig = parts[5];
+
+  if (prefix !== "HT26" || ver !== "V2" || !teamId || !nonce || !ts || !sig) {
+    throw new Error("INVALID_QR_FORMAT: Incomplete cryptographic token parameters.");
+  }
+
+  var payload = "HT26:" + teamId.toUpperCase() + ":" + nonce.toUpperCase() + ":" + ts.toUpperCase();
+  var secret = getQrSigningKey();
+  var sigBytes = Utilities.computeHmacSha256Signature(payload, secret);
+  var expectedSig = sigBytes.map(function(b) {
+    return ('0' + (b & 0xFF).toString(16)).slice(-2);
+  }).join('').substring(0, 16).toUpperCase();
+
+  if (sig.toUpperCase() !== expectedSig) {
+    throw new Error("INVALID_QR_SIGNATURE: This QR badge failed cryptographic integrity verification (tampered or forged).");
+  }
+
+  return true;
+}
+
+/**
+ * ==========================================================================
  * Team Management & Cryptographic QR Passes
  * ==========================================================================
  */
@@ -749,11 +912,16 @@ function initDatabase(ss) {
 function getTeams(ss, data) {
   ss = ss || getSpreadsheet();
   data = data || {};
-  var rows = getSheetObjects(ss.getSheetByName(SHEETS.TEAMS));
 
-  // Determine caller role for PII redaction
-  var callerRole = (data._session && data._session.Role) ? String(data._session.Role).toUpperCase() : "";
-  var isPrivileged = (callerRole === "ADMIN" || callerRole === "ORGANIZER");
+  var rows = getScriptCacheItem("cached_raw_teams");
+  if (!rows) {
+    rows = getSheetObjects(ss.getSheetByName(SHEETS.TEAMS));
+    setScriptCacheItem("cached_raw_teams", rows, CACHE_CONFIG.DEFAULT_TTL);
+  }
+
+  // Only redact PII if this is a JUDGE session requesting via API
+  var isJudge = (data._session && String(data._session.Role).toUpperCase() === "JUDGE");
+  var redactPII = isJudge;
 
   return rows.map(function(r) {
     var team = {
@@ -775,8 +943,8 @@ function getTeams(ss, data) {
       createdAt: r.CreatedAt
     };
 
-    // Only ADMIN/ORGANIZER see PII (emails, phones, QR tokens)
-    if (isPrivileged) {
+    // Redact sensitive PII only for judges
+    if (!redactPII) {
       team.leaderEmail = r.LeaderEmail;
       team.leaderPhone = r.LeaderPhone;
       team.member2Email = r.Member2Email;
@@ -819,173 +987,208 @@ function getTeamByQRToken(ss, data) {
 }
 
 function registerTeam(ss, data) {
-  ss = ss || getSpreadsheet();
-  data = data || {};
-  var teamsSheet = ss.getSheetByName(SHEETS.TEAMS);
-  var existingTeams = getSheetObjects(teamsSheet);
+  return withScriptLock(function() {
+    ss = ss || getSpreadsheet();
+    data = data || {};
+    var teamsSheet = ss.getSheetByName(SHEETS.TEAMS);
+    var existingTeams = getSheetObjects(teamsSheet);
 
-  var teamName = (data.teamName || "").trim();
-  var leaderEmail = (data.leaderEmail || "").trim().toLowerCase();
+    var teamName = (data.teamName || "").trim();
+    var leaderEmail = (data.leaderEmail || "").trim().toLowerCase();
 
-  if (!teamName || !leaderEmail) {
-    throw new Error("VALIDATION_ERROR: Team Name and Leader Email are required for registration.");
-  }
-
-  // Duplicate Check
-  for (var k = 0; k < existingTeams.length; k++) {
-    if (existingTeams[k].LeaderEmail && existingTeams[k].LeaderEmail.toLowerCase() === leaderEmail) {
-      throw new Error("DUPLICATE_TEAM: A team with leader email '" + leaderEmail + "' is already registered.");
+    if (!teamName || !leaderEmail) {
+      throw new Error("VALIDATION_ERROR: Team Name and Leader Email are required for registration.");
     }
-    if (existingTeams[k].TeamName && existingTeams[k].TeamName.toLowerCase() === teamName.toLowerCase()) {
-      throw new Error("DUPLICATE_TEAM: A team with name '" + teamName + "' is already registered.");
+
+    // Duplicate Check
+    for (var k = 0; k < existingTeams.length; k++) {
+      if (existingTeams[k].LeaderEmail && existingTeams[k].LeaderEmail.toLowerCase() === leaderEmail) {
+        throw new Error("DUPLICATE_TEAM: A team with leader email '" + leaderEmail + "' is already registered.");
+      }
+      if (existingTeams[k].TeamName && existingTeams[k].TeamName.toLowerCase() === teamName.toLowerCase()) {
+        throw new Error("DUPLICATE_TEAM: A team with name '" + teamName + "' is already registered.");
+      }
     }
-  }
 
-  var count = existingTeams.length + 1;
-  var paddedNum = ("000" + count).slice(-3);
-  var teamId = "HT2026" + paddedNum;
-  
-  // 128-bit Cryptographic Hex Token
-  var cryptoHex = Utilities.getUuid().replace(/-/g, '').substring(0, 16).toUpperCase();
-  var qrToken = "HT26-SEC-" + teamId + "-" + cryptoHex;
-  var timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss");
+    var count = existingTeams.length + 1;
+    var paddedNum = ("000" + count).slice(-3);
+    var teamId = "HT2026" + paddedNum;
+    
+    // High-Entropy HMAC-SHA256 Cryptographically Signed QR Token
+    var qrToken = generateStrongQrToken(teamId);
+    var timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss");
 
-  var row = [
-    teamId,
-    teamName,
-    data.projectTitle || "Pending Submission",
-    data.domain || "TBD",
-    data.problemStatement || "Pending Release",
-    data.college || "University",
-    data.department || "Engineering",
-    data.leaderName || "Leader Name",
-    leaderEmail,
-    data.leaderPhone || "",
-    data.member2Name || "",
-    data.member2Email || "",
-    data.member2Phone || "",
-    data.member3Name || "",
-    data.member3Email || "",
-    data.member3Phone || "",
-    data.member4Name || "",
-    data.member4Email || "",
-    data.member4Phone || "",
-    "present",
-    true,
-    false,
-    false,
-    qrToken,
-    timestamp
-  ];
+    var row = [
+      teamId,
+      teamName,
+      data.projectTitle || "Pending Submission",
+      data.domain || "TBD",
+      data.problemStatement || "Pending Release",
+      data.college || "University",
+      data.department || "Engineering",
+      data.leaderName || "Leader Name",
+      leaderEmail,
+      data.leaderPhone || "",
+      data.member2Name || "",
+      data.member2Email || "",
+      data.member2Phone || "",
+      data.member3Name || "",
+      data.member3Email || "",
+      data.member3Phone || "",
+      data.member4Name || "",
+      data.member4Email || "",
+      data.member4Phone || "",
+      "present",
+      true,
+      false,
+      false,
+      qrToken,
+      timestamp
+    ];
 
-  teamsSheet.appendRow(row);
-  logActivity(ss, data._session.UserID, data._session.Name, data._session.Role, "Team Registered", "Registered team: " + teamName + " (" + teamId + ")");
+    teamsSheet.appendRow(row);
+    invalidateAllCaches();
+    logActivity(ss, data._session.UserID, data._session.Name, data._session.Role, "Team Registered", "Registered team: " + teamName + " (" + teamId + ")");
 
-  return {
-    teamId: teamId,
-    teamName: teamName,
-    qrCodeToken: qrToken,
-    createdAt: timestamp
-  };
+    return {
+      teamId: teamId,
+      teamName: teamName,
+      qrCodeToken: qrToken,
+      createdAt: timestamp
+    };
+  });
 }
 
-function submitTeamProblemDetails(ss, data) {
-  ss = ss || getSpreadsheet();
-  data = data || {};
-  var teamId = (data.teamId || "").trim();
-  var token = (data.token || "").trim();
-  
-  if (!teamId && !token) throw new Error("VALIDATION_ERROR: Team ID or Security Token is required.");
+function submitTeamProblemDetails(arg1, arg2, arg3, arg4, arg5) {
+  return withScriptLock(function() {
+    var ss = null;
+    var data = {};
 
-  var sheet = ss.getSheetByName(SHEETS.TEAMS);
-  var dataRange = sheet.getDataRange().getValues();
-
-  for (var i = 1; i < dataRange.length; i++) {
-    var row = dataRange[i];
-    if (row[0] === teamId || row[23] === token) {
-      // Backend enforcement: Verify if already submitted!
-      if (row[22] === true || row[22] === "true" || row[23] === true || row[23] === "true") {
-        throw new Error("SUBMISSION_LOCKED: Team '" + row[1] + "' has already submitted and locked their project details.");
-      }
-
-      sheet.getRange(i + 1, 3).setValue(data.projectTitle || "Project");
-      sheet.getRange(i + 1, 4).setValue(data.domain || "AI/ML");
-      sheet.getRange(i + 1, 5).setValue(data.problemStatement || "Problem Statement");
-      sheet.getRange(i + 1, 22).setValue(true); // ProblemSubmitted
-      sheet.getRange(i + 1, 23).setValue(true); // SubmissionLocked
-
-      logActivity(ss, row[0], row[1], "team", "Problem Statement Submitted", "Team " + row[1] + " locked in statement: " + (data.problemStatement || ""));
-
-      return {
-        success: true,
-        teamId: row[0],
-        message: "Problem statement and project details locked successfully in Google Cloud."
+    if (arg1 && typeof arg1 === "object" && typeof arg1.getSheetByName === "function") {
+      // Called internally as (ss, data)
+      ss = arg1;
+      data = arg2 || {};
+    } else if (arg1 && typeof arg1 === "object") {
+      // Called via google.script.run as ({ teamId, ... })
+      ss = getSpreadsheet();
+      data = arg1;
+    } else {
+      // Called via google.script.run as (teamId, token, domain, title, ps)
+      ss = getSpreadsheet();
+      data = {
+        teamId: arg1,
+        token: arg2,
+        domain: arg3,
+        projectTitle: arg4,
+        problemStatement: arg5
       };
     }
-  }
 
-  throw new Error("TEAM_NOT_FOUND: Team not found with specified identifier.");
+    var teamId = (data.teamId || "").trim();
+    var token = (data.token || "").trim();
+    
+    if (!teamId && !token) throw new Error("VALIDATION_ERROR: Team ID or Security Token is required.");
+
+    var sheet = ss.getSheetByName(SHEETS.TEAMS);
+    var dataRange = sheet.getDataRange().getValues();
+
+    for (var i = 1; i < dataRange.length; i++) {
+      var row = dataRange[i];
+      if (row[0] === teamId || (token && row[23] === token)) {
+        // Backend enforcement: Verify if already submitted!
+        if (row[21] === true || row[21] === "true" || row[22] === true || row[22] === "true") {
+          throw new Error("SUBMISSION_LOCKED: Team '" + row[1] + "' has already submitted and locked their project details.");
+        }
+
+        sheet.getRange(i + 1, 3).setValue(data.projectTitle || "Project");
+        sheet.getRange(i + 1, 4).setValue(data.domain || "AI/ML");
+        sheet.getRange(i + 1, 5).setValue(data.problemStatement || "Problem Statement");
+        sheet.getRange(i + 1, 22).setValue(true); // ProblemSubmitted
+        sheet.getRange(i + 1, 23).setValue(true); // SubmissionLocked
+
+        invalidateAllCaches();
+        logActivity(ss, row[0], row[1], "team", "Problem Statement Submitted", "Team " + row[1] + " locked in statement: " + (data.problemStatement || ""));
+
+        return {
+          success: true,
+          teamId: row[0],
+          message: "Problem statement and project details locked successfully in Google Cloud."
+        };
+      }
+    }
+
+    throw new Error("TEAM_NOT_FOUND: Team not found with specified identifier.");
+  });
 }
 
 function updateTeam(ss, data) {
-  ss = ss || getSpreadsheet();
-  data = data || {};
-  if (!data.teamId) throw new Error("VALIDATION_ERROR: teamId is required.");
+  return withScriptLock(function() {
+    ss = ss || getSpreadsheet();
+    data = data || {};
+    if (!data.teamId) throw new Error("VALIDATION_ERROR: teamId is required.");
 
-  var sheet = ss.getSheetByName(SHEETS.TEAMS);
-  var dataRange = sheet.getDataRange().getValues();
+    var sheet = ss.getSheetByName(SHEETS.TEAMS);
+    var dataRange = sheet.getDataRange().getValues();
 
-  for (var i = 1; i < dataRange.length; i++) {
-    if (dataRange[i][0] === data.teamId) {
-      if (data.teamName) sheet.getRange(i + 1, 2).setValue(data.teamName);
-      if (data.projectTitle) sheet.getRange(i + 1, 3).setValue(data.projectTitle);
-      if (data.domain) sheet.getRange(i + 1, 4).setValue(data.domain);
-      if (data.problemStatement) sheet.getRange(i + 1, 5).setValue(data.problemStatement);
-      if (data.college) sheet.getRange(i + 1, 6).setValue(data.college);
-      if (data.department) sheet.getRange(i + 1, 7).setValue(data.department);
-      if (data.leaderName) sheet.getRange(i + 1, 8).setValue(data.leaderName);
-      if (data.leaderEmail) sheet.getRange(i + 1, 9).setValue(data.leaderEmail);
-      if (data.leaderPhone) sheet.getRange(i + 1, 10).setValue(data.leaderPhone);
-      logActivity(ss, data._session.UserID, data._session.Name, data._session.Role, "Team Updated", "Modified team " + data.teamId);
-      return { success: true, teamId: data.teamId };
+    for (var i = 1; i < dataRange.length; i++) {
+      if (dataRange[i][0] === data.teamId) {
+        if (data.teamName) sheet.getRange(i + 1, 2).setValue(data.teamName);
+        if (data.projectTitle) sheet.getRange(i + 1, 3).setValue(data.projectTitle);
+        if (data.domain) sheet.getRange(i + 1, 4).setValue(data.domain);
+        if (data.problemStatement) sheet.getRange(i + 1, 5).setValue(data.problemStatement);
+        if (data.college) sheet.getRange(i + 1, 6).setValue(data.college);
+        if (data.department) sheet.getRange(i + 1, 7).setValue(data.department);
+        if (data.leaderName) sheet.getRange(i + 1, 8).setValue(data.leaderName);
+        if (data.leaderEmail) sheet.getRange(i + 1, 9).setValue(data.leaderEmail);
+        if (data.leaderPhone) sheet.getRange(i + 1, 10).setValue(data.leaderPhone);
+        invalidateAllCaches();
+        logActivity(ss, data._session.UserID, data._session.Name, data._session.Role, "Team Updated", "Modified team " + data.teamId);
+        return { success: true, teamId: data.teamId };
+      }
     }
-  }
-  throw new Error("TEAM_NOT_FOUND: Team " + data.teamId + " not found.");
+    throw new Error("TEAM_NOT_FOUND: Team " + data.teamId + " not found.");
+  });
 }
 
 function deleteTeam(ss, data) {
-  ss = ss || getSpreadsheet();
-  data = data || {};
-  if (!data.teamId) throw new Error("VALIDATION_ERROR: teamId is required.");
+  return withScriptLock(function() {
+    ss = ss || getSpreadsheet();
+    data = data || {};
+    if (!data.teamId) throw new Error("VALIDATION_ERROR: teamId is required.");
 
-  var sheet = ss.getSheetByName(SHEETS.TEAMS);
-  var dataRange = sheet.getDataRange().getValues();
+    var sheet = ss.getSheetByName(SHEETS.TEAMS);
+    var dataRange = sheet.getDataRange().getValues();
 
-  for (var i = 1; i < dataRange.length; i++) {
-    if (dataRange[i][0] === data.teamId) {
-      sheet.deleteRow(i + 1);
-      logActivity(ss, data._session.UserID, data._session.Name, data._session.Role, "Team Deleted", "Deleted team " + data.teamId);
-      return { success: true, teamId: data.teamId };
+    for (var i = 1; i < dataRange.length; i++) {
+      if (dataRange[i][0] === data.teamId) {
+        sheet.deleteRow(i + 1);
+        invalidateAllCaches();
+        logActivity(ss, data._session.UserID, data._session.Name, data._session.Role, "Team Deleted", "Deleted team " + data.teamId);
+        return { success: true, teamId: data.teamId };
+      }
     }
-  }
-  throw new Error("TEAM_NOT_FOUND: Team not found.");
+    throw new Error("TEAM_NOT_FOUND: Team not found.");
+  });
 }
 
 function unlockTeam(ss, data) {
-  ss = ss || getSpreadsheet();
-  data = data || {};
-  var sheet = ss.getSheetByName(SHEETS.TEAMS);
-  var dataRange = sheet.getDataRange().getValues();
+  return withScriptLock(function() {
+    ss = ss || getSpreadsheet();
+    data = data || {};
+    var sheet = ss.getSheetByName(SHEETS.TEAMS);
+    var dataRange = sheet.getDataRange().getValues();
 
-  for (var i = 1; i < dataRange.length; i++) {
-    if (dataRange[i][0] === data.teamId) {
-      sheet.getRange(i + 1, 22).setValue(false); // ProblemSubmitted
-      sheet.getRange(i + 1, 23).setValue(false); // SubmissionLocked
-      logActivity(ss, data._session.UserID, data._session.Name, data._session.Role, "Team Unlocked", "Unlocked submission for team " + data.teamId);
-      return { success: true, teamId: data.teamId, message: "Team submission unlocked for modification." };
+    for (var i = 1; i < dataRange.length; i++) {
+      if (dataRange[i][0] === data.teamId) {
+        sheet.getRange(i + 1, 22).setValue(false); // ProblemSubmitted
+        sheet.getRange(i + 1, 23).setValue(false); // SubmissionLocked
+        invalidateAllCaches();
+        logActivity(ss, data._session.UserID, data._session.Name, data._session.Role, "Team Unlocked", "Unlocked submission for team " + data.teamId);
+        return { success: true, teamId: data.teamId, message: "Team submission unlocked for modification." };
+      }
     }
-  }
-  throw new Error("TEAM_NOT_FOUND: Team not found.");
+    throw new Error("TEAM_NOT_FOUND: Team not found.");
+  });
 }
 
 /**
@@ -995,76 +1198,84 @@ function unlockTeam(ss, data) {
  */
 
 function markAttendance(ss, data) {
-  ss = ss || getSpreadsheet();
-  data = data || {};
-  var rawId = (data.teamId || "").trim();
+  return withScriptLock(function() {
+    ss = ss || getSpreadsheet();
+    data = data || {};
+    var rawId = (data.teamId || "").trim();
 
-  // Server-derived identity from authenticated session
-  var session = data._session;
-  var markedBy = session ? (session.Name + " (" + session.Role + ")") : "System";
-  var usedQrToken = (data.qrToken || rawId).trim();
+    // Server-derived identity from authenticated session
+    var session = data._session;
+    var markedBy = session ? (session.Name + " (" + session.Role + ")") : "System";
+    var usedQrToken = (data.qrToken || rawId).trim();
 
-  if (!rawId) throw new Error("VALIDATION_ERROR: Team ID or QR token is required.");
+    if (!rawId) throw new Error("VALIDATION_ERROR: Team ID or QR token is required.");
 
-  var teams = getTeams(ss);
-  var foundTeam = null;
-
-  for (var i = 0; i < teams.length; i++) {
-    var t = teams[i];
-    if (t.teamId === rawId || t.qrCodeToken === rawId || (t.teamName && t.teamName.toLowerCase() === rawId.toLowerCase())) {
-      foundTeam = t;
-      break;
+    // Cryptographic signature check for V2 tokens
+    if (usedQrToken && usedQrToken.indexOf("HT26-V2-") === 0) {
+      verifyQrTokenIntegrity(usedQrToken);
     }
-  }
 
-  if (!foundTeam) {
-    logActivity(ss, session ? session.UserID : "system", markedBy, "system", "QR Scan Rejected",
-      "Unregistered QR/ID presented: " + rawId);
-    throw new Error("INVALID_QR: Unregistered or invalid QR badge: " + rawId);
-  }
+    var teams = getTeams(ss);
+    var foundTeam = null;
 
-  var attSheet = ss.getSheetByName(SHEETS.ATTENDANCE);
-  var attList = getSheetObjects(attSheet);
+    for (var i = 0; i < teams.length; i++) {
+      var t = teams[i];
+      if (t.teamId === rawId || t.qrCodeToken === rawId || (t.teamName && t.teamName.toLowerCase() === rawId.toLowerCase())) {
+        foundTeam = t;
+        break;
+      }
+    }
 
-  // REPLAY PROTECTION: Check if this exact QR token has already been used for check-in
-  var tokenReplayed = attList.find(function(a) { return a.QRTokenUsed === usedQrToken; });
-  if (tokenReplayed) {
-    logActivity(ss, foundTeam.teamId, foundTeam.teamName, "system",
-      "QR Replay Attack Detected", "Token already used at " + tokenReplayed.CheckInTime + ". Attempted by: " + markedBy);
-    throw new Error(
-      "QR_REPLAYED: This QR badge has already been used for check-in at " +
-      tokenReplayed.CheckInTime + ". Please contact an organizer."
-    );
-  }
+    if (!foundTeam) {
+      logActivity(ss, session ? session.UserID : "system", markedBy, "system", "QR Scan Rejected",
+        "Unregistered QR/ID presented: " + rawId);
+      throw new Error("INVALID_QR: Unregistered or invalid QR badge: " + rawId);
+    }
 
-  // DUPLICATE CHECK: One check-in per team
-  var already = attList.find(function(a) { return a.TeamID === foundTeam.teamId; });
-  if (already) {
+    var attSheet = ss.getSheetByName(SHEETS.ATTENDANCE);
+    var attList = getSheetObjects(attSheet);
+
+    // REPLAY PROTECTION: Check if this exact QR token has already been used for check-in
+    var tokenReplayed = attList.find(function(a) { return a.QRTokenUsed === usedQrToken; });
+    if (tokenReplayed) {
+      logActivity(ss, foundTeam.teamId, foundTeam.teamName, "system",
+        "QR Replay Attack Detected", "Token already used at " + tokenReplayed.CheckInTime + ". Attempted by: " + markedBy);
+      throw new Error(
+        "QR_REPLAYED: This QR badge has already been used for check-in at " +
+        tokenReplayed.CheckInTime + ". Please contact an organizer."
+      );
+    }
+
+    // DUPLICATE CHECK: One check-in per team
+    var already = attList.find(function(a) { return a.TeamID === foundTeam.teamId; });
+    if (already) {
+      return {
+        alreadyCheckedIn: true,
+        success: true,
+        message: "Team " + foundTeam.teamName + " is already checked in.",
+        attendanceId: already.AttendanceID,
+        checkInTime: already.CheckInTime,
+        team: foundTeam
+      };
+    }
+
+    var attId = "ATT-" + ("000" + (attList.length + 1)).slice(-3);
+    var timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss");
+
+    attSheet.appendRow([attId, foundTeam.teamId, foundTeam.teamName, "present", timestamp, markedBy, usedQrToken]);
+    invalidateAllCaches();
+    logActivity(ss, session ? session.UserID : "system", markedBy, session ? session.Role : "system", "Attendance Check-in",
+      "Checked in " + foundTeam.teamName + " (" + foundTeam.teamId + ") at " + timestamp);
+
     return {
-      alreadyCheckedIn: true,
+      alreadyCheckedIn: false,
       success: true,
-      message: "Team " + foundTeam.teamName + " is already checked in.",
-      attendanceId: already.AttendanceID,
-      checkInTime: already.CheckInTime,
+      message: "✓ " + foundTeam.teamName + " checked in successfully!",
+      attendanceId: attId,
+      checkInTime: timestamp,
       team: foundTeam
     };
-  }
-
-  var attId = "ATT-" + ("000" + (attList.length + 1)).slice(-3);
-  var timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss");
-
-  attSheet.appendRow([attId, foundTeam.teamId, foundTeam.teamName, "present", timestamp, markedBy, usedQrToken]);
-  logActivity(ss, session ? session.UserID : "system", markedBy, session ? session.Role : "system", "Attendance Check-in",
-    "Checked in " + foundTeam.teamName + " (" + foundTeam.teamId + ") at " + timestamp);
-
-  return {
-    alreadyCheckedIn: false,
-    success: true,
-    message: "✓ " + foundTeam.teamName + " checked in successfully!",
-    attendanceId: attId,
-    checkInTime: timestamp,
-    team: foundTeam
-  };
+  });
 }
 
 /**
@@ -1072,34 +1283,37 @@ function markAttendance(ss, data) {
  * (e.g. after a lost badge). Old token is revoked by being replaced.
  */
 function generateRotatingQR(ss, data) {
-  ss = ss || getSpreadsheet();
-  data = data || {};
-  var teamId = (data.teamId || "").trim();
-  if (!teamId) throw new Error("VALIDATION_ERROR: teamId is required.");
+  return withScriptLock(function() {
+    ss = ss || getSpreadsheet();
+    data = data || {};
+    var teamId = (data.teamId || "").trim();
+    if (!teamId) throw new Error("VALIDATION_ERROR: teamId is required.");
 
-  var sheet = ss.getSheetByName(SHEETS.TEAMS);
-  var dataRange = sheet.getDataRange().getValues();
+    var sheet = ss.getSheetByName(SHEETS.TEAMS);
+    var dataRange = sheet.getDataRange().getValues();
 
-  for (var i = 1; i < dataRange.length; i++) {
-    if (dataRange[i][0] === teamId) {
-      var oldToken = dataRange[i][23];
-      var newCryptoHex = Utilities.getUuid().replace(/-/g, '').substring(0, 16).toUpperCase();
-      var newToken = "HT26-ROT-" + teamId + "-" + newCryptoHex;
-      sheet.getRange(i + 1, 24).setValue(newToken);
+    for (var i = 1; i < dataRange.length; i++) {
+      if (dataRange[i][0] === teamId) {
+        var oldToken = dataRange[i][23];
+        // Rotate to a fresh high-entropy HMAC-SHA256 Cryptographic Token
+        var newToken = generateStrongQrToken(teamId);
+        sheet.getRange(i + 1, 24).setValue(newToken);
 
-      logActivity(ss, teamId, dataRange[i][1], "system", "QR Token Rotated",
-        "Old: " + oldToken + " → New: " + newToken);
+        invalidateAllCaches();
+        logActivity(ss, teamId, dataRange[i][1], "system", "QR Token Rotated",
+          "Old: " + oldToken + " → New: " + newToken);
 
-      return {
-        success: true,
-        teamId: teamId,
-        teamName: dataRange[i][1],
-        newQRToken: newToken,
-        message: "QR token rotated. Old badge is now invalid."
-      };
+        return {
+          success: true,
+          teamId: teamId,
+          teamName: dataRange[i][1],
+          newQRToken: newToken,
+          message: "QR token rotated. Old badge is now invalid."
+        };
+      }
     }
-  }
-  throw new Error("TEAM_NOT_FOUND: Team not found.");
+    throw new Error("TEAM_NOT_FOUND: Team not found.");
+  });
 }
 
 function getAttendance(ss, data) {
@@ -1120,31 +1334,34 @@ function getJudgeAssignments(ss, data) {
 }
 
 function saveJudgeAssignments(ss, data) {
-  ss = ss || getSpreadsheet();
-  data = data || {};
-  var session = data._session; // Server-derived identity
-  var assignments = data.assignments || data.judgeAssignments || {};
-  var sheet = ss.getSheetByName(SHEETS.JUDGE_ASSIGNMENTS);
-  sheet.clearContents();
-  sheet.appendRow(["AssignmentID", "JudgeID", "JudgeName", "TeamID", "TeamName", "Domain", "Status", "CreatedAt"]);
+  return withScriptLock(function() {
+    ss = ss || getSpreadsheet();
+    data = data || {};
+    var session = data._session; // Server-derived identity
+    var assignments = data.assignments || data.judgeAssignments || {};
+    var sheet = ss.getSheetByName(SHEETS.JUDGE_ASSIGNMENTS);
+    sheet.clearContents();
+    sheet.appendRow(["AssignmentID", "JudgeID", "JudgeName", "TeamID", "TeamName", "Domain", "Status", "CreatedAt"]);
 
-  var timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss");
-  var count = 0;
+    var timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss");
+    var count = 0;
 
-  for (var teamId in assignments) {
-    var jList = assignments[teamId];
-    if (Array.isArray(jList)) {
-      jList.forEach(function(judgeId) {
-        count++;
-        var aId = "ASG-" + ("000" + count).slice(-3);
-        sheet.appendRow([aId, judgeId, "Jury Panelist", teamId, "Team " + teamId, "General", "ACTIVE", timestamp]);
-      });
+    for (var teamId in assignments) {
+      var jList = assignments[teamId];
+      if (Array.isArray(jList)) {
+        jList.forEach(function(judgeId) {
+          count++;
+          var aId = "ASG-" + ("000" + count).slice(-3);
+          sheet.appendRow([aId, judgeId, "Jury Panelist", teamId, "Team " + teamId, "General", "ACTIVE", timestamp]);
+        });
+      }
     }
-  }
 
-  logActivity(ss, session.UserID, session.Name, session.Role, "Judge Assignments Saved",
-    "Updated jury routing matrix with " + count + " assignments.");
-  return { success: true, count: count };
+    invalidateAllCaches();
+    logActivity(ss, session.UserID, session.Name, session.Role, "Judge Assignments Saved",
+      "Updated jury routing matrix with " + count + " assignments.");
+    return { success: true, count: count };
+  });
 }
 
 /**
@@ -1165,93 +1382,96 @@ function validateMark(value, max) {
 }
 
 function submitEvaluation(ss, data) {
-  ss = ss || getSpreadsheet();
-  data = data || {};
-  var round = (data.round || "round1").toLowerCase();
-  var teamId = (data.teamId || "").trim();
+  return withScriptLock(function() {
+    ss = ss || getSpreadsheet();
+    data = data || {};
+    var round = (data.round || "round1").toLowerCase();
+    var teamId = (data.teamId || "").trim();
 
-  // SERVER-DERIVED IDENTITY: Judge identity comes from authenticated session, NEVER the client
-  var session = data._session;
-  if (!session) {
-    throw new Error("AUTH_REQUIRED: Authenticated judge session is required to submit evaluations.");
-  }
-  var judgeId = session.UserID;
-  var judgeName = session.Name;
-
-  if (!teamId) {
-    throw new Error("VALIDATION_ERROR: Team ID is required for evaluation.");
-  }
-
-  // JUDGE ASSIGNMENT ENFORCEMENT: verify judge is assigned to this team
-  var assignments = getSheetObjects(ss.getSheetByName(SHEETS.JUDGE_ASSIGNMENTS));
-  var isAssigned = assignments.some(function(a) {
-    return a.JudgeID === judgeId && a.TeamID === teamId && String(a.Status).toUpperCase() === "ACTIVE";
-  });
-  if (!isAssigned) {
-    logActivity(ss, judgeId, judgeName, "judge", "Unassigned Evaluation Attempt",
-      "Judge " + judgeId + " attempted to score team " + teamId + " but is not assigned.");
-    throw new Error("ACCESS_DENIED: You are not assigned to evaluate team " + teamId + ". Contact admin to update assignments.");
-  }
-
-  // 1. Check if Winners are already declared — scores immutable after lock
-  var settings = handleSettings(ss, "getSettings", {});
-  var isLockedSetting = settings.find(function(s) { return s.Setting === "isLeaderboardLocked"; });
-  if (isLockedSetting && String(isLockedSetting.Value).toLowerCase() === "true") {
-    throw new Error("WINNERS_ALREADY_DECLARED: Winner declaration is complete. All judging scores are permanently locked.");
-  }
-
-  // 2. Enforce Round Active Status on Server
-  var configs = getRoundConfig(ss);
-  var currentRoundConfig = configs.find(function(c) { return c.roundId === round; });
-  if (currentRoundConfig && currentRoundConfig.status !== "active") {
-    throw new Error("ROUND_LOCKED: Judging round '" + (currentRoundConfig.roundName || round) + "' is currently locked by administrators.");
-  }
-
-  // 3. Strict Criteria Scores Validation (0 to 25 per criterion, max 100 total)
-  var c1 = validateMark(data.c1, 25);
-  var c2 = validateMark(data.c2, 25);
-  var c3 = validateMark(data.c3, 25);
-  var c4 = validateMark(data.c4, 25);
-
-  var total = parseFloat((c1 + c2 + c3 + c4).toFixed(2));
-  if (total > 100) {
-    throw new Error("INVALID_SCORE: Total score cannot exceed 100 marks per round.");
-  }
-
-  // Resolve team name from server (never trust client-supplied teamName)
-  var teamName = teamId;
-  try {
-    var teamObj = getTeam(ss, teamId);
-    teamName = teamObj.teamName || teamId;
-  } catch (e) { /* use teamId as fallback */ }
-
-  var targetSheetName = (round === "round2" || round === "2") ? SHEETS.ROUND2 : SHEETS.ROUND1;
-  var sheet = ss.getSheetByName(targetSheetName);
-  var existingEvals = getSheetObjects(sheet);
-
-  // 4. Enforce Composite Key Duplicate Prevention: JudgeID + TeamID + Round
-  for (var i = 0; i < existingEvals.length; i++) {
-    var ev = existingEvals[i];
-    if (ev.JudgeID === judgeId && ev.TeamID === teamId) {
-      throw new Error("DUPLICATE_EVALUATION: You have already evaluated team " + teamId + " for " + round.toUpperCase() + ".");
+    // SERVER-DERIVED IDENTITY: Judge identity comes from authenticated session, NEVER the client
+    var session = data._session;
+    if (!session) {
+      throw new Error("AUTH_REQUIRED: Authenticated judge session is required to submit evaluations.");
     }
-  }
+    var judgeId = session.UserID;
+    var judgeName = session.Name;
 
-  var evalId = "EV-" + round.toUpperCase() + "-" + ("000" + (existingEvals.length + 1)).slice(-3);
-  var timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss");
-  var comments = (data.comments || "").trim();
+    if (!teamId) {
+      throw new Error("VALIDATION_ERROR: Team ID is required for evaluation.");
+    }
 
-  sheet.appendRow([evalId, judgeId, judgeName, teamId, teamName, c1, c2, c3, c4, total, comments, timestamp]);
-  logActivity(ss, judgeId, judgeName, "judge", "Evaluation Submitted",
-    "Scored " + teamName + " (" + teamId + ") with " + total + "/100 for " + round.toUpperCase());
+    // JUDGE ASSIGNMENT ENFORCEMENT: verify judge is assigned to this team
+    var assignments = getSheetObjects(ss.getSheetByName(SHEETS.JUDGE_ASSIGNMENTS));
+    var isAssigned = assignments.some(function(a) {
+      return a.JudgeID === judgeId && a.TeamID === teamId && String(a.Status).toUpperCase() === "ACTIVE";
+    });
+    if (!isAssigned) {
+      logActivity(ss, judgeId, judgeName, "judge", "Unassigned Evaluation Attempt",
+        "Judge " + judgeId + " attempted to score team " + teamId + " but is not assigned.");
+      throw new Error("ACCESS_DENIED: You are not assigned to evaluate team " + teamId + ". Contact admin to update assignments.");
+    }
 
-  return {
-    success: true,
-    evalId: evalId,
-    total: total,
-    timestamp: timestamp,
-    message: "Evaluation score (" + total + "/100) saved and permanently locked in Google Cloud."
-  };
+    // 1. Check if Winners are already declared — scores immutable after lock
+    var settings = handleSettings(ss, "getSettings", {});
+    var isLockedSetting = settings.find(function(s) { return s.Setting === "isLeaderboardLocked"; });
+    if (isLockedSetting && String(isLockedSetting.Value).toLowerCase() === "true") {
+      throw new Error("WINNERS_ALREADY_DECLARED: Winner declaration is complete. All judging scores are permanently locked.");
+    }
+
+    // 2. Enforce Round Active Status on Server
+    var configs = getRoundConfig(ss);
+    var currentRoundConfig = configs.find(function(c) { return c.roundId === round; });
+    if (currentRoundConfig && currentRoundConfig.status !== "active") {
+      throw new Error("ROUND_LOCKED: Judging round '" + (currentRoundConfig.roundName || round) + "' is currently locked by administrators.");
+    }
+
+    // 3. Strict Criteria Scores Validation (0 to 25 per criterion, max 100 total)
+    var c1 = validateMark(data.c1, 25);
+    var c2 = validateMark(data.c2, 25);
+    var c3 = validateMark(data.c3, 25);
+    var c4 = validateMark(data.c4, 25);
+
+    var total = parseFloat((c1 + c2 + c3 + c4).toFixed(2));
+    if (total > 100) {
+      throw new Error("INVALID_SCORE: Total score cannot exceed 100 marks per round.");
+    }
+
+    // Resolve team name from server (never trust client-supplied teamName)
+    var teamName = teamId;
+    try {
+      var teamObj = getTeam(ss, teamId);
+      teamName = teamObj.teamName || teamId;
+    } catch (e) { /* use teamId as fallback */ }
+
+    var targetSheetName = (round === "round2" || round === "2") ? SHEETS.ROUND2 : SHEETS.ROUND1;
+    var sheet = ss.getSheetByName(targetSheetName);
+    var existingEvals = getSheetObjects(sheet);
+
+    // 4. Enforce Composite Key Duplicate Prevention: JudgeID + TeamID + Round
+    for (var i = 0; i < existingEvals.length; i++) {
+      var ev = existingEvals[i];
+      if (ev.JudgeID === judgeId && ev.TeamID === teamId) {
+        throw new Error("DUPLICATE_EVALUATION: You have already evaluated team " + teamId + " for " + round.toUpperCase() + ".");
+      }
+    }
+
+    var evalId = "EV-" + round.toUpperCase() + "-" + ("000" + (existingEvals.length + 1)).slice(-3);
+    var timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss");
+    var comments = (data.comments || "").trim();
+
+    sheet.appendRow([evalId, judgeId, judgeName, teamId, teamName, c1, c2, c3, c4, total, comments, timestamp]);
+    invalidateAllCaches();
+    logActivity(ss, judgeId, judgeName, "judge", "Evaluation Submitted",
+      "Scored " + teamName + " (" + teamId + ") with " + total + "/100 for " + round.toUpperCase());
+
+    return {
+      success: true,
+      evalId: evalId,
+      total: total,
+      timestamp: timestamp,
+      message: "Evaluation score (" + total + "/100) saved and permanently locked in Google Cloud."
+    };
+  });
 }
 
 /**
@@ -1262,6 +1482,9 @@ function submitEvaluation(ss, data) {
 
 function getLeaderboard(ss, data) {
   ss = ss || getSpreadsheet();
+  var cached = getScriptCacheItem("cached_leaderboard");
+  if (cached) return cached;
+
   var teams = getSheetObjects(ss.getSheetByName(SHEETS.TEAMS));
   var r1Evals = getSheetObjects(ss.getSheetByName(SHEETS.ROUND1));
   var r2Evals = getSheetObjects(ss.getSheetByName(SHEETS.ROUND2));
@@ -1307,6 +1530,7 @@ function getLeaderboard(ss, data) {
     else item.winnerStatus = "Finalist";
   });
 
+  setScriptCacheItem("cached_leaderboard", leaderboard, 60); // 1 minute TTL
   return leaderboard;
 }
 
@@ -1338,59 +1562,62 @@ function calculateRoundAverages(evals) {
 }
 
 function declareWinners(ss, data) {
-  ss = ss || getSpreadsheet();
-  data = data || {};
-  
-  var leaderboard = getLeaderboard(ss, data);
-  if (leaderboard.length === 0) {
-    throw new Error("No evaluated teams found to declare winners.");
-  }
+  return withScriptLock(function() {
+    ss = ss || getSpreadsheet();
+    data = data || {};
+    
+    var leaderboard = getLeaderboard(ss, data);
+    if (leaderboard.length === 0) {
+      throw new Error("No evaluated teams found to declare winners.");
+    }
 
-  var leadSheet = ss.getSheetByName(SHEETS.LEADERBOARD);
-  leadSheet.clearContents();
-  leadSheet.appendRow(["Rank", "TeamID", "TeamName", "College", "Domain", "Round1", "Round2", "GrandTotal", "WinnerStatus", "UpdatedTimestamp"]);
+    var leadSheet = ss.getSheetByName(SHEETS.LEADERBOARD);
+    leadSheet.clearContents();
+    leadSheet.appendRow(["Rank", "TeamID", "TeamName", "College", "Domain", "Round1", "Round2", "GrandTotal", "WinnerStatus", "UpdatedTimestamp"]);
 
-  var timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss");
+    var timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss");
 
-  var podium = [];
-  for (var i = 0; i < leaderboard.length; i++) {
-    var t = leaderboard[i];
-    var rank = i + 1;
-    var winnerStatus = "PARTICIPANT";
-    if (rank === 1) winnerStatus = "WINNER_1ST";
-    else if (rank === 2) winnerStatus = "WINNER_2ND";
-    else if (rank === 3) winnerStatus = "WINNER_3RD";
+    var podium = [];
+    for (var i = 0; i < leaderboard.length; i++) {
+      var t = leaderboard[i];
+      var rank = i + 1;
+      var winnerStatus = "PARTICIPANT";
+      if (rank === 1) winnerStatus = "WINNER_1ST";
+      else if (rank === 2) winnerStatus = "WINNER_2ND";
+      else if (rank === 3) winnerStatus = "WINNER_3RD";
 
-    t.rank = rank;
-    t.winnerStatus = winnerStatus;
-    if (rank <= 3) podium.push(t);
+      t.rank = rank;
+      t.winnerStatus = winnerStatus;
+      if (rank <= 3) podium.push(t);
 
-    leadSheet.appendRow([rank, t.teamId, t.teamName, t.college, t.domain, t.round1, t.round2, t.grandTotal, winnerStatus, timestamp]);
-  }
+      leadSheet.appendRow([rank, t.teamId, t.teamName, t.college, t.domain, t.round1, t.round2, t.grandTotal, winnerStatus, timestamp]);
+    }
 
-  // Lock Leaderboard and update Settings
-  var setSheet = ss.getSheetByName(SHEETS.SETTINGS);
-  var setRange = setSheet.getDataRange().getValues();
-  for (var j = 1; j < setRange.length; j++) {
-    if (setRange[j][0] === "isLeaderboardLocked") setSheet.getRange(j + 1, 2).setValue(true);
-    if (setRange[j][0] === "areWinnersDeclared") setSheet.getRange(j + 1, 2).setValue(true);
-    if (setRange[j][0] === "winnerDeclarationTimestamp") setSheet.getRange(j + 1, 2).setValue(timestamp);
-  }
+    // Lock Leaderboard and update Settings
+    var setSheet = ss.getSheetByName(SHEETS.SETTINGS);
+    var setRange = setSheet.getDataRange().getValues();
+    for (var j = 1; j < setRange.length; j++) {
+      if (setRange[j][0] === "isLeaderboardLocked") setSheet.getRange(j + 1, 2).setValue(true);
+      if (setRange[j][0] === "areWinnersDeclared") setSheet.getRange(j + 1, 2).setValue(true);
+      if (setRange[j][0] === "winnerDeclarationTimestamp") setSheet.getRange(j + 1, 2).setValue(timestamp);
+    }
 
-  // Batch Generate Certificates for all teams & participants
-  generateAllCertificates(ss, leaderboard);
+    // Batch Generate Certificates for all teams & participants
+    generateAllCertificates(ss, leaderboard);
 
-  var session = data._session;
-  logActivity(ss, session.UserID, session.Name, session.Role, "Winners Declared & Locked", "Locked leaderboard. 1st: " + (podium[0] ? podium[0].teamName : "N/A"));
+    invalidateAllCaches();
+    var session = data._session;
+    logActivity(ss, session.UserID, session.Name, session.Role, "Winners Declared & Locked", "Locked leaderboard. 1st: " + (podium[0] ? podium[0].teamName : "N/A"));
 
-  return {
-    success: true,
-    locked: true,
-    timestamp: timestamp,
-    podium: podium,
-    totalRanked: leaderboard.length,
-    message: "Winners declared, leaderboard permanently locked, and certificates generated!"
-  };
+    return {
+      success: true,
+      locked: true,
+      timestamp: timestamp,
+      podium: podium,
+      totalRanked: leaderboard.length,
+      message: "Winners declared, leaderboard permanently locked, and certificates generated!"
+    };
+  });
 }
 
 /**
@@ -1442,6 +1669,19 @@ function generateAllCertificates(ss, rankedList) {
 
 function handleCertificates(ss, action, data) {
   ss = ss || getSpreadsheet();
+  if (action === "releaseCertificates" || action === "generateCertificates") {
+    generateAllCertificates(ss);
+    var setSheet = ss.getSheetByName(SHEETS.SETTINGS);
+    if (setSheet) {
+      var setRange = setSheet.getDataRange().getValues();
+      for (var j = 1; j < setRange.length; j++) {
+        if (setRange[j][0] === "areWinnersDeclared") setSheet.getRange(j + 1, 2).setValue(true);
+        if (setRange[j][0] === "isCertificateSystemEnabled") setSheet.getRange(j + 1, 2).setValue(true);
+      }
+    }
+    invalidateAllCaches();
+    return { success: true, message: "All certificates generated and officially released to student passes!" };
+  }
   var sheet = ss.getSheetByName(SHEETS.CERTIFICATES);
   return getSheetObjects(sheet);
 }
@@ -1496,8 +1736,11 @@ function logActivity(ss, userId, userName, role, action, details) {
 
 function getUsers(ss, data) {
   ss = ss || getSpreadsheet();
+  var cached = getScriptCacheItem("cached_users_list");
+  if (cached) return cached;
+
   var rows = getSheetObjects(ss.getSheetByName(SHEETS.USERS));
-  return rows.map(function(r) {
+  var result = rows.map(function(r) {
     return {
       userId: r.UserID,
       name: r.Name,
@@ -1508,57 +1751,68 @@ function getUsers(ss, data) {
       createdAt: r.CreatedAt
     };
   });
+  setScriptCacheItem("cached_users_list", result, CACHE_CONFIG.DEFAULT_TTL);
+  return result;
 }
 
 function createUser(ss, data) {
-  ss = ss || getSpreadsheet();
-  data = data || {};
-  var sheet = ss.getSheetByName(SHEETS.USERS);
-  var users = getSheetObjects(sheet);
+  return withScriptLock(function() {
+    ss = ss || getSpreadsheet();
+    data = data || {};
+    var sheet = ss.getSheetByName(SHEETS.USERS);
+    var users = getSheetObjects(sheet);
 
-  var email = (data.email || "").trim().toLowerCase();
-  if (users.some(function(u) { return String(u.Email).toLowerCase() === email; })) {
-    throw new Error("DUPLICATE_USER: User with this email already exists.");
-  }
+    var email = (data.email || "").trim().toLowerCase();
+    if (users.some(function(u) { return String(u.Email).toLowerCase() === email; })) {
+      throw new Error("DUPLICATE_USER: User with this email already exists.");
+    }
 
-  var count = users.length + 1;
-  var userId = "USR-" + (data.role || "JDG").substring(0, 3).toUpperCase() + "-" + ("00" + count).slice(-2);
-  var password = (data.password || "admin").trim();
-  var passwordHash = hashPassword(password);
-  var timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss");
+    var count = users.length + 1;
+    var userId = "USR-" + (data.role || "JDG").substring(0, 3).toUpperCase() + "-" + ("00" + count).slice(-2);
+    var password = (data.password || "admin").trim();
+    var passwordHash = hashPassword(password);
+    var timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss");
 
-  sheet.appendRow([userId, data.name || "User", email, passwordHash, (data.role || "judge").toLowerCase(), data.specialization || "General", "active", timestamp]);
-  logActivity(ss, data._session.UserID, data._session.Name, data._session.Role, "User Created", "Created user: " + data.name + " (" + email + ")");
+    sheet.appendRow([userId, data.name || "User", email, passwordHash, (data.role || "judge").toLowerCase(), data.specialization || "General", "active", timestamp]);
+    invalidateAllCaches();
+    logActivity(ss, data._session.UserID, data._session.Name, data._session.Role, "User Created", "Created user: " + data.name + " (" + email + ")");
 
-  return { userId: userId, name: data.name, email: email, role: data.role };
+    return { userId: userId, name: data.name, email: email, role: data.role };
+  });
 }
 
 function deleteUser(ss, data) {
-  ss = ss || getSpreadsheet();
-  data = data || {};
+  return withScriptLock(function() {
+    ss = ss || getSpreadsheet();
+    data = data || {};
 
-  // SELF-DELETE PREVENTION: Admin cannot delete their own account
-  if (data._session && data.userId === data._session.UserID) {
-    throw new Error("VALIDATION_ERROR: You cannot delete your own admin account.");
-  }
-
-  var sheet = ss.getSheetByName(SHEETS.USERS);
-  var dataRange = sheet.getDataRange().getValues();
-
-  for (var i = 1; i < dataRange.length; i++) {
-    if (dataRange[i][0] === data.userId) {
-      sheet.deleteRow(i + 1);
-      logActivity(ss, data._session.UserID, data._session.Name, data._session.Role, "User Deleted", "Deleted user " + data.userId);
-      return { success: true };
+    // SELF-DELETE PREVENTION: Admin cannot delete their own account
+    if (data._session && data.userId === data._session.UserID) {
+      throw new Error("VALIDATION_ERROR: You cannot delete your own admin account.");
     }
-  }
-  throw new Error("USER_NOT_FOUND: User not found.");
+
+    var sheet = ss.getSheetByName(SHEETS.USERS);
+    var dataRange = sheet.getDataRange().getValues();
+
+    for (var i = 1; i < dataRange.length; i++) {
+      if (dataRange[i][0] === data.userId) {
+        sheet.deleteRow(i + 1);
+        invalidateAllCaches();
+        logActivity(ss, data._session.UserID, data._session.Name, data._session.Role, "User Deleted", "Deleted user " + data.userId);
+        return { success: true };
+      }
+    }
+    throw new Error("USER_NOT_FOUND: User not found.");
+  });
 }
 
 function getRoundConfig(ss, data) {
   ss = ss || getSpreadsheet();
+  var cached = getScriptCacheItem("cached_round_config");
+  if (cached) return cached;
+
   var rows = getSheetObjects(ss.getSheetByName(SHEETS.ROUND_CONFIG));
-  return rows.map(function(r) {
+  var result = rows.map(function(r) {
     return {
       roundId: r.RoundID,
       roundName: r.RoundName,
@@ -1567,51 +1821,68 @@ function getRoundConfig(ss, data) {
       maxMarks: r.MaxMarks
     };
   });
+  setScriptCacheItem("cached_round_config", result, CACHE_CONFIG.DEFAULT_TTL);
+  return result;
 }
 
 function updateRoundStatus(ss, data) {
-  ss = ss || getSpreadsheet();
-  data = data || {};
-  var roundId = data.roundId || "round1";
-  var status = data.status || "active";
+  return withScriptLock(function() {
+    ss = ss || getSpreadsheet();
+    data = data || {};
+    var roundId = data.roundId || "round1";
+    var status = data.status || "active";
 
-  var sheet = ss.getSheetByName(SHEETS.ROUND_CONFIG);
-  var dataRange = sheet.getDataRange().getValues();
+    var sheet = ss.getSheetByName(SHEETS.ROUND_CONFIG);
+    var dataRange = sheet.getDataRange().getValues();
 
-  for (var i = 1; i < dataRange.length; i++) {
-    if (dataRange[i][0] === roundId) {
-      sheet.getRange(i + 1, 4).setValue(status);
-      logActivity(ss, data._session.UserID, data._session.Name, data._session.Role, "Round Status Changed", "Set " + roundId + " to " + status.toUpperCase());
-      return { roundId: roundId, status: status };
+    for (var i = 1; i < dataRange.length; i++) {
+      if (dataRange[i][0] === roundId) {
+        sheet.getRange(i + 1, 4).setValue(status);
+        invalidateAllCaches();
+        logActivity(ss, data._session.UserID, data._session.Name, data._session.Role, "Round Status Changed", "Set " + roundId + " to " + status.toUpperCase());
+        return { roundId: roundId, status: status };
+      }
     }
-  }
-  return { roundId: roundId, status: status };
+    return { roundId: roundId, status: status };
+  });
 }
 
 function handleSettings(ss, action, data) {
   ss = ss || getSpreadsheet();
   var sheet = ss.getSheetByName(SHEETS.SETTINGS);
   if (action === "updateSettings" && data.settings) {
-    var dataRange = sheet.getDataRange().getValues();
-    for (var k in data.settings) {
-      var found = false;
-      for (var i = 1; i < dataRange.length; i++) {
-        if (dataRange[i][0] === k) {
-          sheet.getRange(i + 1, 2).setValue(data.settings[k]);
-          found = true;
-          break;
+    return withScriptLock(function() {
+      var dataRange = sheet.getDataRange().getValues();
+      for (var k in data.settings) {
+        var found = false;
+        for (var i = 1; i < dataRange.length; i++) {
+          if (dataRange[i][0] === k) {
+            sheet.getRange(i + 1, 2).setValue(data.settings[k]);
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          sheet.appendRow([k, data.settings[k], "Admin", Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss")]);
         }
       }
-      if (!found) {
-        sheet.appendRow([k, data.settings[k], "Admin", Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss")]);
-      }
-    }
+      invalidateAllCaches();
+      return getSheetObjects(sheet);
+    });
   }
-  return getSheetObjects(sheet);
+
+  var cached = getScriptCacheItem("cached_settings");
+  if (cached) return cached;
+  var settings = getSheetObjects(sheet);
+  setScriptCacheItem("cached_settings", settings, CACHE_CONFIG.DEFAULT_TTL);
+  return settings;
 }
 
 function getDashboardStats(ss, data) {
   ss = ss || getSpreadsheet();
+  var cached = getScriptCacheItem("cached_dashboard_stats");
+  if (cached) return cached;
+
   var teams = getSheetObjects(ss.getSheetByName(SHEETS.TEAMS));
   var att = getSheetObjects(ss.getSheetByName(SHEETS.ATTENDANCE));
   var r1 = getSheetObjects(ss.getSheetByName(SHEETS.ROUND1));
@@ -1642,7 +1913,7 @@ function getDashboardStats(ss, data) {
   var r2Set = {};
   r2.forEach(function(e) { if (e.TeamID) r2Set[e.TeamID] = true; });
 
-  return {
+  var result = {
     totalTeams: totalTeams,
     totalParticipants: totalParticipants,
     attendanceRate: attRate,
@@ -1652,6 +1923,8 @@ function getDashboardStats(ss, data) {
     r2Count: Object.keys(r2Set).length,
     domainCounts: domainCounts
   };
+  setScriptCacheItem("cached_dashboard_stats", result, 60); // 1 minute TTL
+  return result;
 }
 
 function getSheetObjects(sheet) {
@@ -1703,16 +1976,22 @@ function escapeHtml(str) {
 function verifyAndLoadTeamPortal(token, emailEntered) {
   var ss = getSpreadsheet();
   emailEntered = (emailEntered || "").trim().toLowerCase();
+  token = (token || "").trim();
 
   if (!emailEntered) {
     throw new Error("Please enter your registered email address to access your team pass.");
   }
 
-  // Find team by QR token
-  var teams = getTeams(ss);
+  // Cryptographic signature check for V2 tokens on presentation
+  if (token && token.indexOf("HT26-V2-") === 0) {
+    verifyQrTokenIntegrity(token);
+  }
+
+  // Find team by QR token OR by Team ID
+  var teams = getTeams(ss, { _internal: true });
   var team = null;
   for (var i = 0; i < teams.length; i++) {
-    if (teams[i].qrCodeToken === token) {
+    if (teams[i].qrCodeToken === token || teams[i].teamId === token) {
       team = teams[i];
       break;
     }
@@ -1737,11 +2016,35 @@ function verifyAndLoadTeamPortal(token, emailEntered) {
      String(callerUser.Role).toLowerCase() === "organizer") &&
     String(callerUser.Status).toLowerCase() === "active";
 
+  // Check if certificates are released for this team
+  var certSheet = ss.getSheetByName(SHEETS.CERTIFICATES);
+  var allCerts = certSheet ? getSheetObjects(certSheet) : [];
+  var teamCerts = allCerts.filter(function(c) {
+    return String(c.TeamID).toUpperCase() === String(team.teamId).toUpperCase();
+  });
+
+  var settings = getSheetObjects(ss.getSheetByName(SHEETS.SETTINGS));
+  var winnersDeclaredSetting = settings.find(function(s) { return s.SettingKey === "areWinnersDeclared"; });
+  var certsEnabledSetting = settings.find(function(s) { return s.SettingKey === "isCertificateSystemEnabled"; });
+
+  var areCertificatesReleased = (teamCerts.length > 0) && (
+    (winnersDeclaredSetting && (winnersDeclaredSetting.SettingValue === true || String(winnersDeclaredSetting.SettingValue).toLowerCase() === "true")) ||
+    (certsEnabledSetting && (certsEnabledSetting.SettingValue === true || String(certsEnabledSetting.SettingValue).toLowerCase() === "true")) ||
+    (teamCerts.some(function(c) { return String(c.Status).toUpperCase() === "VALID" || String(c.Status).toUpperCase() === "RELEASED"; }))
+  );
+
   if (isAdminOrOrganizer) {
     // Admins and organizers can view any team — return full data with privilege flag
     logActivity(ss, callerUser.UserID, callerUser.Name, callerUser.Role, "Admin Portal View",
       "Viewed team portal: " + team.teamName + " (" + team.teamId + ")");
-    return { team: team, accessLevel: "ADMIN", viewerName: callerUser.Name, viewerRole: callerUser.Role };
+    return { 
+      team: team, 
+      accessLevel: "ADMIN", 
+      viewerName: callerUser.Name, 
+      viewerRole: callerUser.Role,
+      areCertificatesReleased: areCertificatesReleased,
+      certificates: teamCerts
+    };
   }
 
   // Collect all member emails for this team
@@ -1771,214 +2074,488 @@ function verifyAndLoadTeamPortal(token, emailEntered) {
   logActivity(ss, emailEntered, emailEntered, "team", "Team Portal Access",
     memberRole + " " + emailEntered + " accessed team portal for " + team.teamName);
 
-  return { team: team, accessLevel: "MEMBER", memberRole: memberRole, viewerEmail: emailEntered };
+  return { 
+    team: team, 
+    accessLevel: "MEMBER", 
+    memberRole: memberRole, 
+    viewerEmail: emailEntered,
+    areCertificatesReleased: areCertificatesReleased,
+    certificates: teamCerts
+  };
 }
 
-/**
- * renderCloudTeamPortal — Shows Email Identity Gate first.
- * After the user enters their email and it is verified server-side by verifyAndLoadTeamPortal(),
- * the full team portal is rendered client-side via google.script.run.
- */
 function renderCloudTeamPortal(teamId, token) {
   var ss = getSpreadsheet();
-
-  // Determine the lookup token/id to embed in the page
   var lookupToken = token || teamId || "";
   if (!lookupToken) {
     return HtmlService.createHtmlOutput(
-      '<html><body style="background:#0B132B;color:#E2E8F0;font-family:system-ui;padding:40px;text-align:center;">' +
-      '<h2 style="color:#EF4444;">⚠ Invalid QR Code</h2>' +
-      '<p>This QR badge link is invalid or missing. Please present your physical QR badge to be scanned by an organizer.</p>' +
+      '<html><body style="background:#070B19;color:#E2E8F0;font-family:system-ui;padding:40px;text-align:center;">' +
+      '<h2 style="color:#EF4444;">⚠ Invalid QR Pass</h2>' +
+      '<p>This QR pass link is invalid or missing. Please present your badge to an organizer.</p>' +
       '</body></html>'
-    ).setTitle("Invalid QR — HackTrack");
+    ).setTitle("Invalid Pass — Synora'26");
   }
 
-  // Build the email gate + dynamic portal page
+  // Instant server-side lookup
+  var teams = getTeams(ss, { _internal: true });
+  var team = null;
+  for (var i = 0; i < teams.length; i++) {
+    if (teams[i].teamId === lookupToken || teams[i].qrCodeToken === lookupToken) {
+      team = teams[i];
+      break;
+    }
+  }
+
+  if (!team) {
+    return HtmlService.createHtmlOutput(
+      '<html><body style="background:#070B19;color:#E2E8F0;font-family:system-ui;padding:40px;text-align:center;">' +
+      '<h2 style="color:#EF4444;">Team Not Found</h2>' +
+      '<p>Could not locate a registered team for token: <b>' + escapeHtml(lookupToken) + '</b>.</p>' +
+      '</body></html>'
+    ).setTitle("Team Not Found — Synora'26");
+  }
+
+  // Fetch certificates
+  var certSheet = ss.getSheetByName(SHEETS.CERTIFICATES);
+  var allCerts = certSheet ? getSheetObjects(certSheet) : [];
+  var teamCerts = allCerts.filter(function(c) {
+    return String(c.TeamID).toUpperCase() === String(team.teamId).toUpperCase();
+  });
+  var areCertsReleased = (teamCerts.length > 0) && teamCerts.some(function(c) {
+    return String(c.Status).toUpperCase() === "VALID" || String(c.Status).toUpperCase() === "RELEASED";
+  });
+
+  var hasStatement = Boolean(team.problemStatement && 
+    team.problemStatement !== "Pending Release" && 
+    team.problemStatement !== "Pending Statement Submission" && 
+    team.problemStatement !== "Pending Submission" && 
+    team.problemStatement.trim().length > 0);
+  var isSubmitted = (team.submissionLocked === true || team.submissionLocked === "true" || team.problemSubmitted === true || team.problemSubmitted === "true" || hasStatement);
+
+  var teamJson = JSON.stringify(team);
+  var certsJson = JSON.stringify(teamCerts);
+
   var html = '<!DOCTYPE html><html lang="en"><head>' +
   '<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">' +
-  '<title>Team Identity Verification — Synora\'26</title>' +
+  '<title>' + escapeHtml(team.teamName) + ' — Synora\'26 Pass</title>' +
   '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">' +
+  '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">' +
+  '<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>' +
+  '<script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>' +
   '<style>' +
-  ':root{--bg:#0B132B;--card:#1C2541;--border:#3A506B;--accent:#06B6D4;--warn:#F59E0B;--success:#10B981;--danger:#EF4444;}' +
-  'body{background:var(--bg);color:#E2E8F0;font-family:system-ui,-apple-system,sans-serif;padding:16px 12px;min-height:100vh;}' +
-  '.card-box{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:20px;margin-bottom:16px;box-shadow:0 8px 32px rgba(0,0,0,0.35);}' +
-  '.btn-primary-custom{background:linear-gradient(135deg,#2563EB,#06B6D4);border:none;color:#fff;font-weight:700;border-radius:10px;padding:13px;width:100%;cursor:pointer;font-size:1rem;transition:opacity .2s;}' +
-  '.btn-primary-custom:hover{opacity:.88;}' +
-  'input{background:#0B132B!important;color:#fff!important;border:1px solid var(--border)!important;border-radius:8px;padding:10px 14px;width:100%;margin-bottom:4px;font-size:1rem;}' +
-  'input:focus{border-color:var(--accent)!important;outline:none!important;box-shadow:0 0 0 2px rgba(6,182,212,.25)!important;}' +
-  'select,textarea{background:#0B132B!important;color:#fff!important;border:1px solid var(--border)!important;border-radius:8px;padding:10px;width:100%;margin-bottom:12px;}' +
-  '.member-badge{display:inline-block;background:rgba(6,182,212,.12);border:1px solid var(--accent);color:var(--accent);border-radius:8px;padding:3px 10px;font-size:.78rem;font-weight:600;margin-bottom:4px;}' +
-  '.spinner{display:inline-block;width:18px;height:18px;border:3px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:8px;}' +
-  '@keyframes spin{to{transform:rotate(360deg)}}' +
-  '#gateScreen,#portalScreen{transition:opacity .3s;}' +
-  '.portal-hidden{display:none!important;}' +
+  ':root{' +
+  '  --bg: #070B19; --card: #0F172A; --card-glass: rgba(15, 23, 42, 0.95);' +
+  '  --border: #1E293B; --border-bright: #334155;' +
+  '  --cyan: #06B6D4; --cyan-glow: rgba(6, 182, 212, 0.25);' +
+  '  --emerald: #10B981; --emerald-glow: rgba(16, 185, 129, 0.25);' +
+  '  --amber: #F59E0B; --amber-glow: rgba(245, 158, 11, 0.25);' +
+  '}' +
+  '* { box-sizing: border-box; }' +
+  'body { background: var(--bg); color: #E2E8F0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 12px; min-height: 100vh; background-image: radial-gradient(ellipse 90% 40% at 50% -10%, rgba(6,182,212,0.18), rgba(255,255,255,0)); }' +
+  '.app-container { max-width: 520px; margin: 0 auto; }' +
+  '.easy-card { background: var(--card-glass); border: 1px solid var(--border); border-radius: 18px; padding: 20px; margin-bottom: 14px; box-shadow: 0 10px 30px rgba(0,0,0,0.45); }' +
+  '.tab-bar { display: flex; background: #0F172A; padding: 5px; border-radius: 14px; border: 1px solid var(--border); gap: 4px; margin-bottom: 16px; }' +
+  '.tab-btn { flex: 1; padding: 10px 6px; background: transparent; border: none; color: #94A3B8; font-weight: 700; font-size: 0.84rem; border-radius: 10px; cursor: pointer; transition: all .2s; display: flex; align-items: center; justify-content: center; gap: 5px; }' +
+  '.tab-btn.active { background: linear-gradient(135deg, #2563EB, #06B6D4); color: #FFFFFF; box-shadow: 0 4px 12px rgba(6,182,212,0.3); }' +
+  '.btn-main { background: linear-gradient(135deg, #2563EB, #06B6D4); border: none; color: #FFFFFF; font-weight: 700; border-radius: 12px; padding: 13px 18px; width: 100%; cursor: pointer; font-size: 1rem; transition: all .2s; box-shadow: 0 4px 16px var(--cyan-glow); }' +
+  '.btn-main:hover { opacity: .92; transform: translateY(-1px); }' +
+  '.btn-soft { background: rgba(255,255,255,0.06); border: 1px solid var(--border-bright); color: #E2E8F0; font-weight: 600; border-radius: 10px; padding: 10px 14px; transition: all .2s; cursor: pointer; }' +
+  '.btn-soft:hover { background: rgba(255,255,255,0.12); color: #FFF; border-color: var(--cyan); }' +
+  'input, select, textarea { background: #070B19 !important; color: #F8FAFC !important; border: 1px solid var(--border-bright) !important; border-radius: 10px; padding: 12px 14px; width: 100%; margin-bottom: 12px; font-size: 0.95rem; }' +
+  'input:focus, select:focus, textarea:focus { border-color: var(--cyan) !important; outline: none !important; box-shadow: 0 0 0 3px var(--cyan-glow) !important; }' +
+  '.badge-pill { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 20px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; }' +
+  '.badge-pill.cyan { background: rgba(6,182,212,0.15); color: #38BDF8; border: 1px solid rgba(6,182,212,0.3); }' +
+  '.badge-pill.emerald { background: rgba(16,185,129,0.15); color: #34D399; border: 1px solid rgba(16,185,129,0.3); }' +
+  '.badge-pill.amber { background: rgba(245,158,11,0.15); color: #FBBF24; border: 1px solid rgba(245,158,11,0.3); }' +
+  '.avatar-circle { width: 38px; height: 38px; border-radius: 50%; background: linear-gradient(135deg, #3B82F6, #06B6D4); display: flex; align-items: center; justify-content: center; font-weight: bold; color: #fff; font-size: 0.9rem; flex-shrink: 0; }' +
+  '.toast-msg { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: #0F172A; border: 1px solid var(--cyan); color: #fff; padding: 12px 24px; border-radius: 30px; font-size: 0.88rem; font-weight: 600; box-shadow: 0 10px 30px rgba(0,0,0,0.6); z-index: 9999; display: none; }' +
+  '.tab-content-panel { display: none; }' +
+  '.tab-content-panel.active { display: block; animation: fadeIn .25s ease-in-out; }' +
+  '@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }' +
+  '.spinner { display: inline-block; width: 18px; height: 18px; border: 3px solid rgba(255,255,255,.3); border-top-color: #fff; border-radius: 50%; animation: spin .7s linear infinite; vertical-align: middle; margin-right: 8px; }' +
+  '@keyframes spin { to { transform: rotate(360deg); } }' +
+  '.member-chip { background: rgba(255,255,255,0.05); border: 1px solid var(--border-bright); border-radius: 25px; padding: 6px 14px; font-size: 0.82rem; font-weight: 600; color: #E2E8F0; cursor: pointer; transition: all .2s; display: inline-flex; align-items: center; gap: 6px; }' +
+  '.member-chip:hover { border-color: var(--cyan); background: rgba(6,182,212,0.12); color: #fff; }' +
+  '.member-chip.selected { background: linear-gradient(135deg, rgba(37,99,235,0.4), rgba(6,182,212,0.3)); border-color: var(--cyan); color: #38BDF8; }' +
   '</style></head><body>' +
 
-  '<div class="container" style="max-width:540px;">' +
+  '<div class="app-container">' +
 
-  '<!-- HEADER -->' +
-  '<div class="text-center mb-4">' +
-  '<div style="font-size:2rem;margin-bottom:6px;">⚙</div>' +
-  '<h3 class="fw-bold text-info mb-0">HackTrack Cloud Pass</h3>' +
-  '<p class="small text-secondary mb-0">Synora\'26 National Flagship Hackathon</p>' +
+  '<!-- 1. TOP HEADER -->' +
+  '<div class="d-flex justify-content-between align-items-center mb-3 pt-2 px-1">' +
+  '  <div class="d-flex align-items-center gap-2">' +
+  '    <div style="width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,#2563EB,#06B6D4);display:flex;align-items:center;justify-content:center;font-size:1.1rem;">⚙</div>' +
+  '    <div>' +
+  '      <h6 class="fw-bold text-white mb-0">Synora\'26 Team Pass</h6>' +
+  '      <div class="small text-secondary" style="font-size:0.75rem;">Cloud Pass • ' + escapeHtml(team.teamId) + '</div>' +
+  '    </div>' +
+  '  </div>' +
+  '  <div id="verifiedStatusBadge"><span class="badge-pill amber"><i class="bi bi-shield-lock"></i> VERIFICATION READY</span></div>' +
   '</div>' +
 
-  '<!-- ==================== EMAIL GATE SCREEN ==================== -->' +
-  '<div id="gateScreen">' +
-  '<div class="card-box" style="border-left:4px solid var(--accent);">' +
-  '<div class="text-center mb-3">' +
-  '<div style="font-size:2.2rem;">🔐</div>' +
-  '<h5 class="fw-bold text-white mb-1">Identity Verification Required</h5>' +
-  '<p class="small text-secondary mb-0">Enter the email address you registered with. Only registered team members can access their pass.</p>' +
-  '</div>' +
-  '<label class="small text-secondary fw-bold mb-1" for="verifyEmail">Your Registered Email Address</label>' +
-  '<input type="email" id="verifyEmail" placeholder="e.g. rahul@college.edu" autocomplete="email" autofocus>' +
-  '<div id="emailError" class="small text-danger mb-2" style="display:none;"></div>' +
-  '<button class="btn-primary-custom mt-2" onclick="verifyIdentity()" id="verifyBtn">🔓 Verify & Open My Pass</button>' +
-  '<p class="small text-secondary text-center mt-3 mb-0">⚠ Only your registered email gives you access. Accessing another team\'s pass is not permitted and is logged.</p>' +
-  '</div>' +
+  '<!-- 2. TEAM OVERVIEW CARD -->' +
+  '<div class="easy-card mb-3" style="border-left:5px solid var(--cyan);">' +
+  '  <div class="d-flex justify-content-between align-items-start">' +
+  '    <div>' +
+  '      <span class="badge bg-primary font-monospace mb-1">' + escapeHtml(team.teamId) + '</span>' +
+  '      <h3 class="fw-bold text-white mb-1">' + escapeHtml(team.teamName) + '</h3>' +
+  '      <div class="small text-secondary">🏛️ ' + escapeHtml(team.college || "University") + (team.department ? " • " + escapeHtml(team.department) : "") + '</div>' +
+  '    </div>' +
+  '  </div>' +
   '</div>' +
 
-  '<!-- ==================== PORTAL SCREEN (hidden until verified) ==================== -->' +
-  '<div id="portalScreen" class="portal-hidden"></div>' +
+  '<!-- 3. SEAMLESS MEMBER VERIFICATION CARD -->' +
+  '<div class="easy-card mb-3" id="easyVerificationCard" style="border-left:5px solid var(--cyan);background:linear-gradient(180deg, rgba(6,182,212,0.08) 0%, rgba(15,23,42,1) 100%);">' +
+  '  <div class="d-flex justify-content-between align-items-center mb-2">' +
+  '    <div class="fw-bold text-white"><i class="bi bi-person-badge text-info me-1"></i> Member Identity Verification</div>' +
+  '    <span class="badge-pill cyan">1-Step</span>' +
+  '  </div>' +
+  '  <p class="small text-secondary mb-2">Select who you are to easily unlock verified project submission &amp; certificates:</p>' +
+  '  <div class="d-flex flex-wrap gap-2 mb-3" id="memberChipsContainer">' +
+  (team.leaderName ? ('<div class="member-chip" onclick="selectMemberToVerify(\'' + escapeHtml(team.leaderName) + '\', \'' + escapeHtml(team.leaderEmail || "") + '\', \'Team Leader\')">👑 ' + escapeHtml(team.leaderName) + ' <span class="badge bg-warning text-dark ms-1">Leader</span></div>') : '') +
+  (team.member2Name ? ('<div class="member-chip" onclick="selectMemberToVerify(\'' + escapeHtml(team.member2Name) + '\', \'' + escapeHtml(team.member2Email || "") + '\', \'Member\')">👤 ' + escapeHtml(team.member2Name) + '</div>') : '') +
+  (team.member3Name ? ('<div class="member-chip" onclick="selectMemberToVerify(\'' + escapeHtml(team.member3Name) + '\', \'' + escapeHtml(team.member3Email || "") + '\', \'Member\')">👤 ' + escapeHtml(team.member3Name) + '</div>') : '') +
+  (team.member4Name ? ('<div class="member-chip" onclick="selectMemberToVerify(\'' + escapeHtml(team.member4Name) + '\', \'' + escapeHtml(team.member4Email || "") + '\', \'Member\')">👤 ' + escapeHtml(team.member4Name) + '</div>') : '') +
+  '  </div>' +
+  '  <div id="verifyEmailInputArea" style="display:none;">' +
+  '    <label class="small text-secondary fw-bold mb-1">Confirm Registered Email for <span id="verifyingNameLabel" class="text-white"></span>:</label>' +
+  '    <div class="d-flex gap-2">' +
+  '      <input type="email" id="quickVerifyEmail" placeholder="e.g. participant@university.edu" style="margin-bottom:0;">' +
+  '      <button class="btn-main" style="width:auto;white-space:nowrap;padding:10px 18px;" onclick="executeQuickVerify()">Verify</button>' +
+  '    </div>' +
+  '    <div id="quickVerifyError" class="small text-danger mt-1" style="display:none;"></div>' +
+  '  </div>' +
+  '  <div id="verifiedSuccessBox" style="display:none;" class="p-2 rounded bg-success bg-opacity-10 border border-success border-opacity-25 mt-2">' +
+  '    <div class="d-flex justify-content-between align-items-center">' +
+  '      <div class="small text-success fw-bold"><i class="bi bi-check-circle-fill me-1"></i> Verified as <span id="verifiedSuccessName" class="text-white"></span> (<span id="verifiedSuccessRole"></span>)</div>' +
+  '      <button class="btn btn-link btn-sm text-secondary p-0" onclick="resetVerification()" style="font-size:0.75rem;">Switch</button>' +
+  '    </div>' +
+  '  </div>' +
+  '</div>' +
 
-  '<div class="text-center text-secondary small py-2">⚙ Synora\'26 Cloud System • Google Sheets Live Database</div>' +
+  '<!-- 4. NAVIGATION TABS -->' +
+  '<div class="tab-bar">' +
+  '  <button class="tab-btn active" id="btnTabQr" onclick="showTab(\'qr\')"><i class="bi bi-qr-code"></i> QR Pass</button>' +
+  '  <button class="tab-btn" id="btnTabProject" onclick="showTab(\'project\')"><i class="bi bi-code-slash"></i> Project' + (isSubmitted ? ' ✓' : '') + '</button>' +
+  '  <button class="tab-btn" id="btnTabTeam" onclick="showTab(\'team\')"><i class="bi bi-people-fill"></i> Team</button>' +
+  (areCertsReleased ? '<button class="tab-btn" id="btnTabCerts" onclick="showTab(\'certs\')"><i class="bi bi-award-fill text-warning"></i> Certificates</button>' : '') +
+  '</div>' +
+
+  '<!-- ================= TAB 1: QR CHECK-IN PASS ================= -->' +
+  '<div class="tab-content-panel active" id="tabPanel_qr">' +
+  '  <div class="easy-card text-center" style="border-left:5px solid var(--emerald);">' +
+  '    <h5 class="text-white fw-bold mb-1">📱 Check-In QR Badge</h5>' +
+  '    <p class="small text-secondary mb-3">Show this QR badge at the registration desk for fast check-in.</p>' +
+  '    <div id="passQrCanvas" class="d-flex justify-content-center p-3 bg-white rounded-3 mx-auto shadow-sm" style="width:190px;height:190px;"></div>' +
+  '    <div class="mt-2 small text-info fw-bold font-monospace">TOKEN: ' + escapeHtml(team.qrCodeToken || lookupToken) + '</div>' +
+  '    <div class="row g-2 mt-3">' +
+  '      <div class="col-6"><button class="btn-soft w-100 fw-bold" onclick="downloadPassImage()"><i class="bi bi-download"></i> Save to Photos</button></div>' +
+  '      <div class="col-6"><button class="btn-soft w-100 fw-bold" onclick="window.print()"><i class="bi bi-printer"></i> Print Pass</button></div>' +
+  '    </div>' +
+  '  </div>' +
+  '</div>' +
+
+  '<!-- ================= TAB 2: PROJECT & PROBLEM STATEMENT ================= -->' +
+  '<div class="tab-content-panel" id="tabPanel_project">' +
+  '  <div class="easy-card" id="projectDetailsBox" style="border-left:5px solid ' + (isSubmitted ? "var(--emerald)" : "var(--amber)") + ';">' +
+  (isSubmitted ? (
+    '<div class="d-flex justify-content-between align-items-center mb-2">' +
+    '  <h5 class="text-success fw-bold mb-0">🔒 Submitted Project Details</h5>' +
+    '  <span class="badge-pill emerald">✓ Locked &amp; Saved</span>' +
+    '</div>' +
+    '<div class="mb-2"><span class="badge bg-info text-dark fw-bold px-3 py-1 fs-6">🏷️ ' + escapeHtml(team.domain || "AI/ML") + '</span></div>' +
+    '<div class="small text-secondary fw-bold text-uppercase mb-1">Project Title</div>' +
+    '<h5 class="text-white fw-bold mb-3 p-2 rounded" style="background:#070B19;border:1px solid #1E293B;">' + escapeHtml(team.projectTitle || "Project Submission") + '</h5>' +
+    '<div class="small text-secondary fw-bold text-uppercase mb-1">Problem Statement &amp; Solution Summary</div>' +
+    '<div class="p-3 rounded mb-3 text-light" style="background:#070B19;border:1px solid #1E293B;white-space:pre-wrap;font-size:0.95rem;line-height:1.65;">' + escapeHtml(team.problemStatement || "No description provided.") + '</div>' +
+    '<div class="alert py-2 small mb-0" style="background:#082F49;border:1px solid #0284C7;color:#BAE6FD;">' +
+    '  <i class="bi bi-shield-check me-1"></i> <b>Google Cloud Secured:</b> Project permanently locked on live ledger.</div>'
+  ) : (
+    '<div class="d-flex justify-content-between align-items-center mb-2">' +
+    '  <h5 class="text-warning fw-bold mb-0">📝 Submit Your Project Details</h5>' +
+    '  <span class="badge-pill amber">1-Time Entry</span>' +
+    '</div>' +
+    '<p class="small text-secondary mb-3">Please submit your project domain, title, and approach. Once submitted, it will be <b>locked permanently</b>.</p>' +
+    '<form id="easyProblemForm" onsubmit="handleEasySubmit(event)">' +
+    '  <label class="small text-secondary fw-bold mb-1">Project Domain / Track *</label>' +
+    '  <select id="easyDomain" required>' +
+    '    <option value="">Choose Domain...</option>' +
+    '    <option>AI/ML</option><option>Cyber Security</option><option>Cloud &amp; DevOps</option>' +
+    '    <option>Web Development</option><option>IoT &amp; Smart Hardware</option>' +
+    '    <option>FinTech &amp; Open Banking</option><option>Healthcare &amp; Blockchain</option><option>Agriculture &amp; ML</option>' +
+    '  </select>' +
+    '  <label class="small text-secondary fw-bold mb-1">Project Title *</label>' +
+    '  <input type="text" id="easyTitle" placeholder="e.g. Autonomous Solar Energy Optimizer" required>' +
+    '  <label class="small text-secondary fw-bold mb-1">Problem Statement &amp; Solution Approach *</label>' +
+    '  <textarea id="easyPS" rows="4" placeholder="Briefly describe the problem you are solving and your solution architecture..." required></textarea>' +
+    '  <button type="submit" id="easyLockBtn" class="btn-main mt-1">🔒 Submit &amp; Permanently Lock In</button>' +
+    '</form>' +
+    '<div id="easySubmitStatus" class="mt-2"></div>'
+  )) +
+  '  </div>' +
+  '</div>' +
+
+  '<!-- ================= TAB 3: TEAM MEMBERS ================= -->' +
+  '<div class="tab-content-panel" id="tabPanel_team">' +
+  '  <div class="easy-card">' +
+  '    <h6 class="text-white fw-bold mb-3">👥 Registered Team Members</h6>' +
+  '    <div class="d-flex flex-column gap-2">' +
+  (team.leaderName ? ('<div class="d-flex align-items-center justify-content-between p-2 rounded" style="background:#070B19;border:1px solid #1E293B;">' +
+    '<div class="d-flex align-items-center gap-2"><div class="avatar-circle">' + escapeHtml(team.leaderName.charAt(0).toUpperCase()) + '</div>' +
+    '<div><div class="fw-bold text-white">👑 ' + escapeHtml(team.leaderName) + ' <span class="badge bg-warning text-dark ms-1">Leader</span></div>' +
+    (team.leaderEmail ? '<div class="small text-secondary">' + escapeHtml(team.leaderEmail) + '</div>' : '') + '</div></div>' +
+    '<span class="badge-pill emerald">Verified</span></div>') : '') +
+  (team.member2Name ? ('<div class="d-flex align-items-center justify-content-between p-2 rounded" style="background:#070B19;border:1px solid #1E293B;">' +
+    '<div class="d-flex align-items-center gap-2"><div class="avatar-circle">' + escapeHtml(team.member2Name.charAt(0).toUpperCase()) + '</div>' +
+    '<div><div class="fw-bold text-white">👤 ' + escapeHtml(team.member2Name) + '</div>' +
+    (team.member2Email ? '<div class="small text-secondary">' + escapeHtml(team.member2Email) + '</div>' : '') + '</div></div>' +
+    '<span class="badge-pill emerald">Verified</span></div>') : '') +
+  (team.member3Name ? ('<div class="d-flex align-items-center justify-content-between p-2 rounded" style="background:#070B19;border:1px solid #1E293B;">' +
+    '<div class="d-flex align-items-center gap-2"><div class="avatar-circle">' + escapeHtml(team.member3Name.charAt(0).toUpperCase()) + '</div>' +
+    '<div><div class="fw-bold text-white">👤 ' + escapeHtml(team.member3Name) + '</div>' +
+    (team.member3Email ? '<div class="small text-secondary">' + escapeHtml(team.member3Email) + '</div>' : '') + '</div></div>' +
+    '<span class="badge-pill emerald">Verified</span></div>') : '') +
+  (team.member4Name ? ('<div class="d-flex align-items-center justify-content-between p-2 rounded" style="background:#070B19;border:1px solid #1E293B;">' +
+    '<div class="d-flex align-items-center gap-2"><div class="avatar-circle">' + escapeHtml(team.member4Name.charAt(0).toUpperCase()) + '</div>' +
+    '<div><div class="fw-bold text-white">👤 ' + escapeHtml(team.member4Name) + '</div>' +
+    (team.member4Email ? '<div class="small text-secondary">' + escapeHtml(team.member4Email) + '</div>' : '') + '</div></div>' +
+    '<span class="badge-pill emerald">Verified</span></div>') : '') +
+  '    </div>' +
+  '  </div>' +
+  '</div>' +
+
+  '<!-- ================= TAB 4: CERTIFICATES (If Released) ================= -->' +
+  (areCertsReleased ? (
+    '<div class="tab-content-panel" id="tabPanel_certs">' +
+    '  <div class="easy-card text-center py-4" style="border:2px solid var(--amber);background:linear-gradient(180deg, rgba(245,158,11,0.15) 0%, rgba(15,23,42,1) 100%);">' +
+    '    <div style="font-size:2.8rem;margin-bottom:4px;">🎓</div>' +
+    '    <span class="badge-pill amber mb-2">OFFICIAL CREDENTIALS RELEASED</span>' +
+    '    <h4 class="text-white fw-bold mb-1">' + escapeHtml(team.teamName) + '</h4>' +
+    '    <div class="alert py-2 text-start my-3" style="background:#070B19;border:1px solid #1E293B;color:#BAE6FD;font-size:0.88rem;">' +
+    '      🏆 <b>Standing:</b> ' + escapeHtml(teamCerts[0] ? teamCerts[0].Achievement : "Participation") + '<br/>Your official certificates are issued and digitally verifiable on Google Cloud.' +
+    '    </div>' +
+    '    <div class="d-flex flex-column gap-2" id="certButtonsList"></div>' +
+    '  </div>' +
+    '</div>'
+  ) : '') +
+
+  '<div id="easyToast" class="toast-msg"></div>' +
+  '<div class="text-center text-secondary small py-2" style="font-size:0.75rem;">⚙ Synora\'26 Live Participant Pass • Google Cloud Verified</div>' +
   '</div>' +
 
   '<script>' +
-  'var LOOKUP_TOKEN = "' + escapeHtml(lookupToken) + '";' +
-  'var verifiedEmail = "";' +
-  'var teamData = null;' +
-  'var verifierRole = "";' +
+  'var TEAM = ' + teamJson + ';' +
+  'var CERTS = ' + certsJson + ';' +
+  'var areCertsReleased = ' + (areCertsReleased ? "true" : "false") + ';' +
+  'var verifiedMember = null;' +
 
-  'document.getElementById("verifyEmail").addEventListener("keydown", function(e){' +
-  '  if(e.key==="Enter") verifyIdentity();' +
+  'function showTab(tabId) {' +
+  '  document.querySelectorAll(".tab-btn").forEach(function(b){ b.classList.remove("active"); });' +
+  '  document.querySelectorAll(".tab-content-panel").forEach(function(p){ p.classList.remove("active"); });' +
+  '  var btn = document.getElementById("btnTab" + tabId.charAt(0).toUpperCase() + tabId.slice(1));' +
+  '  var panel = document.getElementById("tabPanel_" + tabId);' +
+  '  if (btn) btn.classList.add("active");' +
+  '  if (panel) panel.classList.add("active");' +
+  '}' +
+
+  'function selectMemberToVerify(name, email, role) {' +
+  '  document.querySelectorAll(".member-chip").forEach(function(c){ c.classList.remove("selected"); });' +
+  '  if (event && event.currentTarget) event.currentTarget.classList.add("selected");' +
+  '  var inputArea = document.getElementById("verifyEmailInputArea");' +
+  '  var label = document.getElementById("verifyingNameLabel");' +
+  '  var input = document.getElementById("quickVerifyEmail");' +
+  '  label.textContent = name;' +
+  '  inputArea.style.display = "block";' +
+  '  input.value = email || "";' +
+  '  input.focus();' +
+  '}' +
+
+  'function executeQuickVerify() {' +
+  '  var email = (document.getElementById("quickVerifyEmail").value || "").trim().toLowerCase();' +
+  '  var err = document.getElementById("quickVerifyError");' +
+  '  err.style.display = "none";' +
+  '  if (!email || !email.includes("@")) {' +
+  '    err.textContent = "Please enter a valid email address."; err.style.display = "block"; return;' +
+  '  }' +
+  '  google.script.run' +
+  '    .withSuccessHandler(function(res) {' +
+  '      verifiedMember = res;' +
+  '      try { localStorage.setItem("hacktrack_pass_user_" + (TEAM.qrCodeToken||TEAM.teamId), JSON.stringify(res)); } catch(e){}' +
+  '      applyVerifiedState(res);' +
+  '      showToast("✓ Identity verified as " + (res.viewerName || res.memberRole));' +
+  '      try { confetti({ particleCount: 40, spread: 50, origin: { y: 0.4 } }); } catch(e){}' +
+  '    })' +
+  '    .withFailureHandler(function(e) {' +
+  '      err.textContent = e.message || String(e); err.style.display = "block";' +
+  '    })' +
+  '    .verifyAndLoadTeamPortal(TEAM.qrCodeToken || TEAM.teamId, email);' +
+  '}' +
+
+  'function applyVerifiedState(v) {' +
+  '  var badge = document.getElementById("verifiedStatusBadge");' +
+  '  badge.innerHTML = \'<span class="badge-pill emerald"><i class="bi bi-patch-check-fill"></i> \' + esc(v.memberRole || "VERIFIED") + \'</span>\';' +
+  '  document.getElementById("verifyEmailInputArea").style.display = "none";' +
+  '  document.getElementById("memberChipsContainer").style.display = "none";' +
+  '  var succ = document.getElementById("verifiedSuccessBox");' +
+  '  succ.style.display = "block";' +
+  '  document.getElementById("verifiedSuccessName").textContent = v.viewerEmail || v.memberRole;' +
+  '  document.getElementById("verifiedSuccessRole").textContent = v.memberRole || "Member";' +
+  '}' +
+
+  'function resetVerification() {' +
+  '  verifiedMember = null;' +
+  '  try { localStorage.removeItem("hacktrack_pass_user_" + (TEAM.qrCodeToken||TEAM.teamId)); } catch(e){}' +
+  '  document.getElementById("verifiedStatusBadge").innerHTML = \'<span class="badge-pill amber"><i class="bi bi-shield-lock"></i> VERIFICATION READY</span>\';' +
+  '  document.getElementById("memberChipsContainer").style.display = "flex";' +
+  '  document.getElementById("verifiedSuccessBox").style.display = "none";' +
+  '  document.getElementById("verifyEmailInputArea").style.display = "none";' +
+  '}' +
+
+  'window.addEventListener("DOMContentLoaded", function() {' +
+  '  // Check cached verified identity' +
+  '  try {' +
+  '    var cached = localStorage.getItem("hacktrack_pass_user_" + (TEAM.qrCodeToken||TEAM.teamId));' +
+  '    if (cached) {' +
+  '      var vObj = JSON.parse(cached);' +
+  '      if (vObj && vObj.viewerEmail) {' +
+  '        verifiedMember = vObj;' +
+  '        applyVerifiedState(vObj);' +
+  '      }' +
+  '    }' +
+  '  } catch(e){}' +
+  '  // Render QR Code immediately' +
+  '  var qrEl = document.getElementById("passQrCanvas");' +
+  '  if (qrEl && typeof QRCode !== "undefined") {' +
+  '    new QRCode(qrEl, {' +
+  '      text: TEAM.qrCodeToken || "' + escapeHtml(lookupToken) + '",' +
+  '      width: 160,' +
+  '      height: 160,' +
+  '      colorDark: "#070B19",' +
+  '      colorLight: "#FFFFFF",' +
+  '      correctLevel: QRCode.CorrectLevel.H' +
+  '    });' +
+  '  }' +
+  '  // Render Certificate buttons' +
+  '  if (areCertsReleased && CERTS.length > 0) {' +
+  '    var btnList = document.getElementById("certButtonsList");' +
+  '    if (btnList) {' +
+  '      CERTS.forEach(function(c) {' +
+  '        var b = document.createElement("button");' +
+  '        b.className = "btn-soft w-100 fw-bold d-flex justify-content-between align-items-center py-2";' +
+  '        b.innerHTML = "<span>📜 " + esc(c.ParticipantName) + " (" + esc(c.Role) + ")</span> <span class=\'badge bg-primary\'>🖨️ View / Print</span>";' +
+  '        b.onclick = function() { printMemberCertificate(c.CertificateID, c.ParticipantName, c.Role, c.Achievement, TEAM.teamName, TEAM.college, c.VerificationToken); };' +
+  '        btnList.appendChild(b);' +
+  '      });' +
+  '    }' +
+  '    try { confetti({ particleCount: 50, spread: 60, origin: { y: 0.5 } }); } catch(e){}' +
+  '  }' +
   '});' +
 
-  'function verifyIdentity() {' +
-  '  var email = document.getElementById("verifyEmail").value.trim();' +
-  '  var btn = document.getElementById("verifyBtn");' +
-  '  var errBox = document.getElementById("emailError");' +
-  '  errBox.style.display = "none";' +
-  '  if (!email || !email.includes("@")) {' +
-  '    errBox.textContent = "Please enter a valid email address.";' +
-  '    errBox.style.display = "block";' +
-  '    return;' +
-  '  }' +
-  '  btn.disabled = true;' +
-  '  btn.innerHTML = \'<span class="spinner"></span>Verifying identity...\';' +
-  '  google.script.run' +
-  '    .withSuccessHandler(function(result) {' +
-  '      verifiedEmail = email;' +
-  '      teamData = result.team;' +
-  '      verifierRole = result.accessLevel;' +
-  '      renderPortal(result);' +
-  '    })' +
-  '    .withFailureHandler(function(err) {' +
-  '      btn.disabled = false;' +
-  '      btn.innerHTML = "🔓 Verify & Open My Pass";' +
-  '      errBox.textContent = err.message || String(err);' +
-  '      errBox.style.display = "block";' +
-  '    })' +
-  '    .verifyAndLoadTeamPortal(LOOKUP_TOKEN, email);' +
+  'function showToast(msg) {' +
+  '  var t = document.getElementById("easyToast");' +
+  '  t.textContent = msg; t.style.display = "block";' +
+  '  setTimeout(function(){ t.style.display = "none"; }, 2500);' +
   '}' +
 
-  'function renderPortal(result) {' +
-  '  var t = result.team;' +
-  '  var isAdmin = result.accessLevel === "ADMIN";' +
-  '  var memberRole = result.memberRole || result.viewerRole || "Member";' +
-  '  document.getElementById("gateScreen").style.display = "none";' +
-  '  var p = document.getElementById("portalScreen");' +
-  '  p.classList.remove("portal-hidden");' +
-
-  '  var badge = isAdmin' +
-  '    ? \'<span class="badge bg-danger ms-2">👑 \' + (result.viewerRole||"ADMIN").toUpperCase() + \' VIEW</span>\'' +
-  '    : \'<span class="badge bg-success ms-2">✓ \' + memberRole + \'</span>\';' +
-
-  '  var memberList = "";' +
-  '  if(t.leaderName) memberList += \'<li class="list-group-item bg-transparent border-secondary text-white px-0">👑 <b>\' + esc(t.leaderName) + \'</b>\' + (t.leaderEmail ? \' <span class="small text-secondary">(\' + esc(t.leaderEmail) + \')</span>\' : \'\') + \'</li>\';' +
-  '  if(t.member2Name) memberList += \'<li class="list-group-item bg-transparent border-secondary text-white px-0">👤 \' + esc(t.member2Name) + (t.member2Email ? \' <span class="small text-secondary">(\' + esc(t.member2Email) + \')</span>\' : \'\') + \'</li>\';' +
-  '  if(t.member3Name) memberList += \'<li class="list-group-item bg-transparent border-secondary text-white px-0">👤 \' + esc(t.member3Name) + (t.member3Email ? \' <span class="small text-secondary">(\' + esc(t.member3Email) + \')</span>\' : \'\') + \'</li>\';' +
-  '  if(t.member4Name) memberList += \'<li class="list-group-item bg-transparent border-secondary text-white px-0">👤 \' + esc(t.member4Name) + (t.member4Email ? \' <span class="small text-secondary">(\' + esc(t.member4Email) + \')</span>\' : \'\') + \'</li>\';' +
-
-  '  p.innerHTML = ' +
-  '    \'<div class="card-box" style="border-left:4px solid #06B6D4;">\' +' +
-  '    \'<div class="d-flex justify-content-between align-items-center mb-1">\' +' +
-  '    \'<h4 class="text-white fw-bold mb-0">\' + esc(t.teamName) + \'</h4>\' +' +
-  '    \'<span class="badge bg-primary">\' + esc(t.teamId) + \'</span></div>\' +' +
-  '    \'<p class="small text-secondary mb-2">\' + esc(t.college||"") + \' • \' + esc(t.department||"") + \'</p>\' +' +
-  '    \'<div class="mb-2">\' + badge + \'</div>\' +' +
-  '    \'<div class="small text-secondary fw-bold text-uppercase mb-1">Registered Member Roster</div>\' +' +
-  '    \'<ul class="list-group list-group-flush">\' + memberList + \'</ul>\' +' +
-  '    \'</div>\' +' +
-  '    buildProjectSection(t, isAdmin) +' +
-  '    buildRoundsSection(t);' +
-  '}' +
-
-  'function buildProjectSection(t, isAdmin) {' +
-  '  var isSubmitted = (t.submissionLocked === true || t.submissionLocked === "true" || t.problemSubmitted === true || t.problemSubmitted === "true");' +
-  '  if (isSubmitted) {' +
-  '    return \'<div class="card-box" style="border-color:#10B981;">\' +' +
-  '      \'<div class="d-flex justify-content-between align-items-center mb-2">\' +' +
-  '      \'<h5 class="text-success fw-bold mb-0">🔒 Project Submission Locked</h5>\' +' +
-  '      \'<span class="badge bg-success">Submitted</span></div>\' +' +
-  '      \'<div class="mb-2"><span class="badge bg-info text-dark">\' + esc(t.domain||"") + \'</span></div>\' +' +
-  '      \'<p class="fw-bold text-white mb-1">\' + esc(t.projectTitle||"Pending") + \'</p>\' +' +
-  '      \'<p class="small text-secondary mb-2">\' + esc(t.problemStatement||"") + \'</p>\' +' +
-  '      \'<div class="alert py-2 small mb-0" style="background:#0F2744;border:1px solid #1E4976;color:#93C5FD;"><b>Locked:</b> Submission is permanently recorded in Google Cloud.</div>\' +' +
-  '      \'</div>\';' +
-  '  }' +
-  '  return \'<div class="card-box" id="subBox" style="border-color:#F59E0B;">\' +' +
-  '    \'<h5 class="text-warning fw-bold mb-1">🔓 One-Time Problem Statement Submission</h5>\' +' +
-  '    \'<p class="small text-secondary mb-3">Once submitted this <b>cannot be edited</b>. Ensure all details are correct before locking.</p>\' +' +
-  '    \'<form id="problemForm" onsubmit="handleCloudSubmit(event)">\' +' +
-  '    \'<label class="small text-secondary">Select Domain *</label>\' +' +
-  '    \'<select id="subDomain" required>\' +' +
-  '    \'<option value="">Select Domain...</option>\' +' +
-  '    \'<option>AI/ML</option><option>Cyber Security</option><option>Cloud &amp; DevOps</option>\' +' +
-  '    \'<option>Web Development</option><option>IoT &amp; Smart Hardware</option>\' +' +
-  '    \'<option>FinTech &amp; Open Banking</option><option>Healthcare &amp; Blockchain</option><option>Agriculture &amp; ML</option>\' +' +
-  '    \'</select>\' +' +
-  '    \'<label class="small text-secondary">Project Title *</label>\' +' +
-  '    \'<input type="text" id="subTitle" placeholder="e.g. Autonomous Vision Anomaly Detector" required>\' +' +
-  '    \'<label class="small text-secondary">Problem Statement / Summary *</label>\' +' +
-  '    \'<textarea id="subPS" rows="3" placeholder="Describe your problem approach..." required></textarea>\' +' +
-  '    \'<button type="submit" id="lockBtn" class="btn-primary-custom">🔒 Lock In Problem Statement</button>\' +' +
-  '    \'</form>\' +' +
-  '    \'<div id="submitStatus" class="mt-3"></div>\' +' +
-  '    \'</div>\';' +
-  '}' +
-
-  'function buildRoundsSection(t) {' +
-  '  return \'<div class="card-box">\' +' +
-  '    \'<h6 class="text-secondary text-uppercase small fw-bold mb-2">Jury Evaluation Rounds (200 Max Marks)</h6>\' +' +
-  '    \'<div class="row g-2 text-center">\' +' +
-  '    \'<div class="col-6"><div class="p-2 border border-secondary rounded"><div class="small fw-bold">Round 1 (100)</div><span class="badge bg-secondary">LOCKED</span></div></div>\' +' +
-  '    \'<div class="col-6"><div class="p-2 border border-secondary rounded"><div class="small fw-bold">Round 2 (100)</div><span class="badge bg-secondary">LOCKED</span></div></div>\' +' +
-  '    \'</div></div>\';' +
-  '}' +
-
-  'function handleCloudSubmit(e) {' +
+  'function handleEasySubmit(e) {' +
   '  e.preventDefault();' +
-  '  var domain = document.getElementById("subDomain").value;' +
-  '  var title = document.getElementById("subTitle").value.trim();' +
-  '  var ps = document.getElementById("subPS").value.trim();' +
-  '  var btn = document.getElementById("lockBtn");' +
-  '  var status = document.getElementById("submitStatus");' +
-  '  if (!confirm("Are you sure? Your submission will be permanently locked and cannot be changed.")) return;' +
+  '  var domain = document.getElementById("easyDomain").value;' +
+  '  var title = document.getElementById("easyTitle").value.trim();' +
+  '  var ps = document.getElementById("easyPS").value.trim();' +
+  '  var btn = document.getElementById("easyLockBtn");' +
+  '  var status = document.getElementById("easySubmitStatus");' +
+  '  if (!confirm("Are you sure you want to lock this project? Once submitted, it cannot be modified.")) return;' +
   '  btn.disabled = true;' +
-  '  btn.innerHTML = \'<span class="spinner"></span>Locking in Cloud...\';' +
+  '  btn.innerHTML = \'<span class="spinner"></span>Locking in Google Cloud...\';' +
+  '  var submitEmail = verifiedMember ? verifiedMember.viewerEmail : (TEAM.leaderEmail || "");' +
   '  google.script.run' +
   '    .withSuccessHandler(function() {' +
-  '      status.innerHTML = \'<div class="alert alert-success">✓ Submission locked successfully! Refreshing...</div>\';' +
-  '      setTimeout(function(){location.reload();}, 1400);' +
+  '      var box = document.getElementById("projectDetailsBox");' +
+  '      box.style.borderLeft = "5px solid var(--emerald)";' +
+  '      box.innerHTML = \'<div class="d-flex justify-content-between align-items-center mb-2">\' +' +
+  '        \'<h5 class="text-success fw-bold mb-0">🔒 Submitted Project Details</h5>\' +' +
+  '        \'<span class="badge-pill emerald">✓ Locked &amp; Saved</span></div>\' +' +
+  '        \'<div class="mb-2"><span class="badge bg-info text-dark fw-bold px-3 py-1 fs-6">🏷️ \' + esc(domain) + \'</span></div>\' +' +
+  '        \'<div class="small text-secondary fw-bold text-uppercase mb-1">Project Title</div>\' +' +
+  '        \'<h5 class="text-white fw-bold mb-3 p-2 rounded" style="background:#070B19;border:1px solid #1E293B;">\' + esc(title) + \'</h5>\' +' +
+  '        \'<div class="small text-secondary fw-bold text-uppercase mb-1">Problem Statement &amp; Solution Summary</div>\' +' +
+  '        \'<div class="p-3 rounded mb-2 text-light" style="background:#070B19;border:1px solid #1E293B;white-space:pre-wrap;font-size:0.95rem;line-height:1.65;">\' + esc(ps) + \'</div>\' +' +
+  '        \'<div class="alert py-2 small mb-0" style="background:#082F49;border:1px solid #0284C7;color:#BAE6FD;">\' +' +
+  '        \'<i class="bi bi-shield-check me-1"></i> <b>Google Cloud Secured:</b> Problem statement permanently locked on live ledger.</div>\';' +
+  '      document.getElementById("btnTabProject").innerHTML = \'<i class="bi bi-code-slash"></i> Project ✓\';' +
+  '      showToast("✓ Project details locked successfully!");' +
   '    })' +
   '    .withFailureHandler(function(err) {' +
   '      btn.disabled = false;' +
-  '      btn.innerHTML = "🔒 Lock In Problem Statement";' +
-  '      status.innerHTML = \'<div class="alert alert-danger">\' + (err.message || err) + \'</div>\';' +
+  '      btn.innerHTML = "🔒 Submit &amp; Permanently Lock In";' +
+  '      status.innerHTML = \'<div class="alert alert-danger py-2 small">\' + (err.message||String(err)) + \'</div>\';' +
   '    })' +
-  '    .submitTeamProblemDetailsVerified(teamData.teamId, teamData.qrCodeToken, verifiedEmail, domain, title, ps);' +
+  '    .submitTeamProblemDetails(TEAM.teamId, TEAM.qrCodeToken, domain, title, ps);' +
+  '}' +
+
+  'function downloadPassImage() {' +
+  '  var canvas = document.createElement("canvas");' +
+  '  canvas.width = 400; canvas.height = 500;' +
+  '  var ctx = canvas.getContext("2d");' +
+  '  ctx.fillStyle = "#0F172A"; ctx.fillRect(0,0,400,500);' +
+  '  ctx.fillStyle = "#06B6D4"; ctx.fillRect(0,0,400,8);' +
+  '  ctx.fillStyle = "#FFFFFF"; ctx.font = "bold 20px sans-serif"; ctx.textAlign = "center";' +
+  '  ctx.fillText("SYNORA\'26 HACKPASS", 200, 45);' +
+  '  ctx.fillStyle = "#94A3B8"; ctx.font = "14px sans-serif";' +
+  '  ctx.fillText(TEAM.teamName + " (" + TEAM.teamId + ")", 200, 75);' +
+  '  var qrImg = document.querySelector("#passQrCanvas img");' +
+  '  if(qrImg) {' +
+  '    ctx.drawImage(qrImg, 110, 110, 180, 180);' +
+  '  }' +
+  '  ctx.fillStyle = "#38BDF8"; ctx.font = "bold 15px monospace";' +
+  '  ctx.fillText("TOKEN: " + (TEAM.qrCodeToken || "' + escapeHtml(lookupToken) + '"), 200, 330);' +
+  '  ctx.fillStyle = "#34D399"; ctx.font = "13px sans-serif";' +
+  '  ctx.fillText("✓ Verified Identity • Google Cloud Pass", 200, 380);' +
+  '  var link = document.createElement("a");' +
+  '  link.download = "HackTrack_Pass_" + TEAM.teamId + ".png";' +
+  '  link.href = canvas.toDataURL("image/png");' +
+  '  link.click();' +
+  '  showToast("✓ Pass saved to your device photos!");' +
+  '}' +
+
+  'function printMemberCertificate(certId, name, role, achievement, teamName, college, token) {' +
+  '  var printWindow = window.open("", "_blank");' +
+  '  if (!printWindow) { alert("Please allow popups to view printable certificate."); return; }' +
+  '  printWindow.document.write(' +
+  '    "<!DOCTYPE html><html><head><title>Official Certificate - " + name + "</title>" +' +
+  '    "<link rel=\'stylesheet\' href=\'https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css\'>" +' +
+  '    "<script src=\'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js\'><\\/script>" +' +
+  '    "<style>" +' +
+  '    "@page { size: landscape; margin: 10mm; }" +' +
+  '    "body { background: #fff; color: #0F172A; font-family: Georgia, serif; padding: 25px; text-align: center; }" +' +
+  '    ".cert-border { border: 12px double #1E3A8A; padding: 40px; border-radius: 8px; position: relative; }" +' +
+  '    ".cert-title { font-size: 2.6rem; font-weight: bold; letter-spacing: 3px; color: #1E3A8A; text-transform: uppercase; margin-bottom: 5px; }" +' +
+  '    ".cert-sub { font-size: 1.05rem; color: #475569; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 25px; }" +' +
+  '    ".cert-name { font-size: 2.4rem; font-weight: bold; color: #0F172A; border-bottom: 2px solid #CBD5E1; display: inline-block; padding: 0 35px 6px; margin: 15px 0; }" +' +
+  '    ".cert-text { font-size: 1.18rem; color: #334155; line-height: 1.6; max-width: 720px; margin: 0 auto 25px; }" +' +
+  '    ".cert-meta { font-family: monospace; font-size: 0.88rem; color: #64748B; }" +' +
+  '    "</style></head><body>" +' +
+  '    "<div class=\'cert-border\'>" +' +
+  '    "<div class=\'cert-title\'>Certificate of " + (achievement.indexOf("Winner")!==-1||achievement.indexOf("Runner")!==-1?"Excellence":"Participation") + "</div>" +' +
+  '    "<div class=\'cert-sub\'>Synora\\\'26 National Flagship Hackathon</div>" +' +
+  '    "<p style=\'font-style:italic;color:#64748B;margin-bottom:5px;\'>This is proudly presented to</p>" +' +
+  '    "<div class=\'cert-name\'>" + name + "</div>" +' +
+  '    "<div class=\'cert-text\'>of team <b>" + teamName + "</b> (" + (college||"") + ") in recognition of exemplary innovation and technical achievement in <b>Synora\\\'26 National Hackathon</b>.<br/><br/><span class=\'badge bg-primary px-3 py-2 fs-6\'>Achievement: " + achievement + "</span></div>" +' +
+  '    "<div class=\'row mt-4 pt-3 border-top align-items-center\'>" +' +
+  '    "<div class=\'col-4 text-start\'><div class=\'fw-bold\'>Dr. Arvind Kumar</div><div class=\'small text-muted\'>Convener, Synora\\\'26</div></div>" +' +
+  '    "<div class=\'col-4 text-center\'><div id=\'pCertQr\' class=\'d-inline-block bg-white p-1\'></div><div class=\'cert-meta mt-1\'>ID: " + certId + "</div></div>" +' +
+  '    "<div class=\'col-4 text-end\'><div class=\'fw-bold\'>Prof. R. S. Sharma</div><div class=\'small text-muted\'>Jury Head &amp; Dean</div></div>" +' +
+  '    "</div>" +' +
+  '    "</div>" +' +
+  '    "<script>" +' +
+  '    "window.onload = function() {" +' +
+  '    "  new QRCode(document.getElementById(\'pCertQr\'), { text: \'" + certId + ":" + token + "\', width: 75, height: 75, correctLevel: QRCode.CorrectLevel.H });" +' +
+  '    "  setTimeout(function(){ window.print(); }, 400);" +' +
+  '    "};" +' +
+  '    "<\\/script>" +' +
+  '    "</body></html>"' +
+  '  );' +
+  '  printWindow.document.close();' +
   '}' +
 
   'function esc(s) {' +
@@ -1988,7 +2565,7 @@ function renderCloudTeamPortal(teamId, token) {
   '</body></html>';
 
   return HtmlService.createHtmlOutput(html)
-    .setTitle("Team Identity Verification — Synora'26")
+    .setTitle(team.teamName + " — Synora'26 Pass")
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
@@ -2003,7 +2580,7 @@ function submitTeamProblemDetailsVerified(teamId, token, verifiedEmail, domain, 
   if (!verifiedEmail) throw new Error("AUTH_REQUIRED: Verified email is required to submit.");
 
   // Re-validate ownership server-side (defense in depth — never trust client alone)
-  var teams = getTeams(ss);
+  var teams = getTeams(ss, { _internal: true });
   var team = null;
   for (var i = 0; i < teams.length; i++) {
     if (teams[i].teamId === teamId || teams[i].qrCodeToken === token) {
@@ -2047,6 +2624,92 @@ function submitTeamProblemDetailsVerified(teamId, token, verifiedEmail, domain, 
     domain: domain,
     projectTitle: projectTitle,
     problemStatement: problemStatement
+  });
+}
+
+/**
+ * ==========================================================================
+ * Enterprise Architecture: Telemetry, Auditing & Bulk Ingestion
+ * ==========================================================================
+ */
+
+function getSystemHealth(ss, data) {
+  ss = ss || getSpreadsheet();
+  var start = new Date().getTime();
+  
+  var counts = {};
+  var allSheets = [
+    SHEETS.USERS, SHEETS.SESSIONS, SHEETS.TEAMS, SHEETS.ATTENDANCE,
+    SHEETS.JUDGE_ASSIGNMENTS, SHEETS.ROUND1, SHEETS.ROUND2,
+    SHEETS.LEADERBOARD, SHEETS.CERTIFICATES, SHEETS.ACTIVITY_LOGS,
+    SHEETS.LOGIN_ATTEMPTS, SHEETS.SCORE_AUDIT
+  ];
+
+  allSheets.forEach(function(sName) {
+    var sh = ss.getSheetByName(sName);
+    counts[sName] = sh ? Math.max(0, sh.getLastRow() - 1) : 0;
+  });
+
+  var sessSheet = ss.getSheetByName(SHEETS.SESSIONS);
+  var sessRows = sessSheet ? getSheetObjects(sessSheet) : [];
+  var activeSessions = sessRows.filter(function(s) {
+    return String(s.Status).toUpperCase() === "ACTIVE" && new Date(s.ExpiresAt) > new Date();
+  }).length;
+
+  var elapsedMs = new Date().getTime() - start;
+
+  return {
+    status: "HEALTHY",
+    version: "3.5.0-ENTERPRISE",
+    serverTimestamp: Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss z"),
+    databaseUrl: ss.getUrl(),
+    latencyMs: elapsedMs,
+    activeSessionsCount: activeSessions,
+    tableRecords: counts,
+    security: {
+      passwordHashing: "SHA-256 (64-character hex)",
+      qrSigning: "HMAC-SHA256 Cryptographic Tokens",
+      rateLimiting: "5 attempts / 15-min rolling window",
+      concurrencyEngine: "Atomic Script Mutex Lock (LockService)",
+      cacheLayer: "Tiered ScriptCache (TTL 180s)"
+    }
+  };
+}
+
+function getScoreAuditLogs(ss, data) {
+  ss = ss || getSpreadsheet();
+  var sheet = ss.getSheetByName(SHEETS.SCORE_AUDIT);
+  return getSheetObjects(sheet);
+}
+
+function bulkRegisterTeams(ss, data) {
+  return withScriptLock(function() {
+    ss = ss || getSpreadsheet();
+    data = data || {};
+    var rawTeams = data.teams || [];
+    if (!Array.isArray(rawTeams) || rawTeams.length === 0) {
+      throw new Error("VALIDATION_ERROR: 'teams' must be a non-empty array of team objects.");
+    }
+
+    var registered = [];
+    var errors = [];
+
+    rawTeams.forEach(function(t) {
+      try {
+        var res = registerTeam(ss, Object.assign({}, t, { _session: data._session }));
+        registered.push(res);
+      } catch (err) {
+        errors.push({ teamName: t.teamName, error: err.message });
+      }
+    });
+
+    return {
+      success: true,
+      registeredCount: registered.length,
+      errorCount: errors.length,
+      registered: registered,
+      errors: errors
+    };
   });
 }
 

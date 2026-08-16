@@ -144,25 +144,43 @@ const Utils = {
   },
 
   /**
-   * Generate QR Code into DOM element
+   * Generate QR Code into DOM element with high resilience
    */
   renderQrCode(elementId, text, width = 160, height = 160) {
     const el = document.getElementById(elementId);
     if (!el) return;
     el.innerHTML = "";
-    if (typeof QRCode !== "undefined") {
-      new QRCode(el, {
-        text: text,
-        width: width,
-        height: height,
-        colorDark: "#0F172A",
-        colorLight: "#FFFFFF",
-        correctLevel: QRCode.CorrectLevel.H
-      });
-    } else {
-      // Fallback SVG QR placeholder
-      el.innerHTML = `<div style="padding:10px; font-size:11px; text-align:center;"><b>QR Token:</b><br/>${text}</div>`;
+
+    try {
+      if (typeof QRCode !== "undefined") {
+        const correctLevel = (typeof QRCode.CorrectLevel !== "undefined" && typeof QRCode.CorrectLevel.H !== "undefined")
+          ? QRCode.CorrectLevel.H
+          : 2;
+        new QRCode(el, {
+          text: text,
+          width: width,
+          height: height,
+          colorDark: "#0F172A",
+          colorLight: "#FFFFFF",
+          correctLevel: correctLevel
+        });
+        return;
+      }
+    } catch (err) {
+      console.warn("QRCode JS rendering error, using fallback renderer:", err);
     }
+
+    // High-reliability inline fallback image renderer
+    el.innerHTML = `
+      <div style="display:flex; justify-content:center; align-items:center; flex-direction:column; padding:8px;">
+        <img src="https://api.qrserver.com/v1/create-qr-code/?size=${width}x${height}&data=${encodeURIComponent(text)}" 
+             alt="QR Code" style="width:${width}px; height:${height}px; max-width:100%; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,0.12);" 
+             onerror="this.style.display='none'; this.nextElementSibling.style.display='block';" />
+        <div style="display:none; padding:10px; font-size:11px; color:#0F172A; word-break:break-all; text-align:center;">
+          <b>QR Pass Payload:</b><br/>${text}
+        </div>
+      </div>
+    `;
   },
 
   formatDate(dateStr) {

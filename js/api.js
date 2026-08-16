@@ -30,6 +30,9 @@ const API = {
     }
   },
 
+  // In-memory client cache for fast tab-switching during peak events
+  _clientCache: new Map(),
+
   async request(action, payload = {}) {
     this.initLocalStore();
 
@@ -41,37 +44,76 @@ const API = {
       }
     }
 
+    // Client cache check for read-only actions (30s TTL)
+    const isReadAction = ["getRoundConfig", "getSettings", "getLeaderboard"].includes(action);
+    const cacheKey = `${action}_${JSON.stringify(payload)}`;
+    if (isReadAction && this._clientCache.has(cacheKey)) {
+      const cached = this._clientCache.get(cacheKey);
+      if (Date.now() - cached.timestamp < 30000) {
+        return cached.data;
+      }
+    }
+
     if (CONFIG.API_URL && CONFIG.API_URL.trim().startsWith("http")) {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 6000); // 6s timeout for Google Apps Script
+      const MAX_RETRIES = 3;
+      let lastError = null;
 
-      try {
-        const response = await fetch(CONFIG.API_URL, {
-          method: "POST",
-          headers: { "Content-Type": "text/plain;charset=utf-8" },
-          body: JSON.stringify({ action, ...payload }),
-          redirect: "follow",
-          signal: controller.signal
-        });
-        
-        clearTimeout(timeoutId);
+      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        if (attempt > 0) {
+          // Exponential backoff + randomized jitter (400ms, 1000ms, 2200ms + 0-200ms)
+          const baseDelay = Math.min(2500, Math.pow(2.5, attempt) * 160);
+          const jitter = Math.random() * 200;
+          await new Promise(r => setTimeout(r, baseDelay + jitter));
+        }
 
-        if (response.ok) {
-          const resJson = await response.json();
-          if (resJson.success) {
-            return resJson.data;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout for high-concurrency peak
+
+        try {
+          const response = await fetch(CONFIG.API_URL, {
+            method: "POST",
+            headers: { "Content-Type": "text/plain;charset=utf-8" },
+            body: JSON.stringify({ action, ...payload }),
+            redirect: "follow",
+            signal: controller.signal
+          });
+
+          clearTimeout(timeoutId);
+
+          if (response.ok) {
+            const resJson = await response.json();
+            if (resJson.success) {
+              if (isReadAction) {
+                this._clientCache.set(cacheKey, { data: resJson.data, timestamp: Date.now() });
+              } else {
+                this._clientCache.clear(); // Clear client cache on any write
+              }
+              return resJson.data;
+            } else {
+              const errObj = resJson.error || "Execution Error";
+              const errMsg = typeof errObj === "object" ? (errObj.message || JSON.stringify(errObj)) : errObj;
+              // Don't retry validation or auth failures
+              if (errMsg.includes("AUTH_REQUIRED") || errMsg.includes("ACCESS_DENIED") || errMsg.includes("VALIDATION_ERROR") || errMsg.includes("INVALID_CREDENTIALS")) {
+                throw new Error(errMsg);
+              }
+              lastError = new Error(errMsg);
+            }
           } else {
-            const errObj = resJson.error || "Execution Error";
-            const errMsg = typeof errObj === "object" ? (errObj.message || JSON.stringify(errObj)) : errObj;
-            throw new Error(errMsg);
+            lastError = new Error(`HTTP_${response.status}: Server busy`);
           }
+        } catch (err) {
+          clearTimeout(timeoutId);
+          // If it's a permanent auth/validation error, throw directly
+          if (err.message.includes("AUTH_REQUIRED") || err.message.includes("ACCESS_DENIED") || err.message.includes("VALIDATION_ERROR") || err.message.includes("INVALID_CREDENTIALS")) {
+            throw err;
+          }
+          lastError = err;
         }
-      } catch (err) {
-        clearTimeout(timeoutId);
-        // If it's a specific validation/auth error from server, throw directly
-        if (!err.message.includes("Failed to fetch") && !err.message.includes("NetworkError") && !err.message.includes("aborted")) {
-          throw err;
-        }
+      }
+
+      // If all retries were exhausted and not a fatal auth/validation error, fall back to local store
+      if (lastError && !lastError.message.includes("Failed to fetch") && !lastError.message.includes("aborted")) {
+        throw lastError;
       }
     }
 
@@ -167,8 +209,11 @@ const API = {
 
         const count = teams.length + 1;
         const teamId = `HT2026${("000" + count).slice(-3)}`;
-        // Strong cryptographic QR token
-        const qrCodeToken = `HT26-SEC-${teamId}-${Math.floor(10000 + Math.random() * 90000)}`;
+        // Cryptographically strong high-entropy HMAC-styled V2 token
+        const nonce = Array.from(crypto.getRandomValues(new Uint8Array(8))).map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+        const sig = Array.from(crypto.getRandomValues(new Uint8Array(8))).map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+        const tsHex = Math.floor(Date.now() / 1000).toString(16).toUpperCase();
+        const qrCodeToken = `HT26-V2-${teamId}-${nonce}-${tsHex}-${sig}`;
         const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
 
         const newTeam = {

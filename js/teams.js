@@ -70,7 +70,7 @@ const Teams = {
             </div>
           </td>
           <td>
-            <button class="btn-table-action" onclick="Teams.showQrModal('${t.teamId}', '${t.teamName}', '${t.qrCodeToken}')">
+            <button class="btn-table-action" onclick="Teams.showQrModal('${t.teamId}')">
               <i class="bi bi-qr-code"></i> View QR Pass
             </button>
           </td>
@@ -142,19 +142,28 @@ const Teams = {
       CONFIG.DOMAINS.map(d => `<option value="${d}">${d}</option>`).join('');
   },
 
-  showQrModal(teamId, teamName, qrToken) {
-    document.getElementById('qrModalTeamName').textContent = teamName;
-    document.getElementById('qrModalTeamId').textContent = teamId;
-    document.getElementById('qrModalTokenText').textContent = qrToken;
+  showQrModal(teamId, fallbackName, fallbackToken) {
+    const team = (this.allTeams || []).find(t => t.teamId === teamId) || {};
+    const teamName = team.teamName || fallbackName || teamId;
+    const qrToken = team.qrCodeToken || fallbackToken || ("HT26-" + teamId);
+
+    const nameEl = document.getElementById('qrModalTeamName');
+    if (nameEl) nameEl.textContent = teamName;
+
+    const idEl = document.getElementById('qrModalTeamId');
+    if (idEl) idEl.textContent = teamId;
+
+    const tokenEl = document.getElementById('qrModalTokenText');
+    if (tokenEl) tokenEl.textContent = qrToken;
 
     // Use Live Cloud Web App URL so any mobile phone can scan from anywhere in the world!
     let portalUrl = "";
     if (CONFIG.API_URL && CONFIG.API_URL.startsWith("http")) {
-      portalUrl = `${CONFIG.API_URL}?page=team&teamId=${teamId}&token=${qrToken}`;
+      portalUrl = `${CONFIG.API_URL}?page=team&teamId=${encodeURIComponent(teamId)}&token=${encodeURIComponent(qrToken)}`;
     } else {
       const origin = window.location.origin + window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/'));
       const rootPath = origin.replace('/admin', '').replace('/organizer', '');
-      portalUrl = `${rootPath}/team-portal.html?teamId=${teamId}&token=${qrToken}`;
+      portalUrl = `${rootPath}/team-portal.html?teamId=${encodeURIComponent(teamId)}&token=${encodeURIComponent(qrToken)}`;
     }
 
     const linkEl = document.getElementById('qrModalPortalLink');
@@ -163,8 +172,10 @@ const Teams = {
       linkEl.textContent = `Open Live Cloud Team Portal (${teamId})`;
     }
 
-    Utils.renderQrCode('qrModalCanvas', portalUrl, 200, 200);
     Utils.openModal('teamQrModal');
+    setTimeout(() => {
+      Utils.renderQrCode('qrModalCanvas', portalUrl, 200, 200);
+    }, 40);
   },
 
   async viewTeamDetails(teamId) {
