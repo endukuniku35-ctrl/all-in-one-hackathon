@@ -1,6 +1,12 @@
-# ⚙️ HackTrack | Synora'26 — Enterprise Digital Hackathon Operating System
+# ⚙️ HackTrack | Synora'26 — Cloud-Based Hackathon Management Platform
 
-**HackTrack** is an enterprise-grade, full-lifecycle digital hackathon management, judging, and verification platform built for **Synora'26**. It orchestrates the entire hackathon workflow—from organizer team onboarding and cryptographic QR attendance check-in, to one-time project locking, 2-round multi-criteria jury scoring (200 marks total), real-time auditorium projector broadcasting, automated certificate generation, and public credential verification.
+**HackTrack** is a robust, full-lifecycle digital hackathon management, judging, and verification platform built for **Synora'26**. It orchestrates the entire hackathon workflow—from organizer team onboarding and cryptographic HMAC-SHA256 QR check-in, to one-time project locking, 2-round multi-criteria jury scoring (200 marks total), real-time auditorium projector broadcasting, automated certificate generation, and public credential verification.
+
+> [!NOTE]
+> **Architecture Overview**: Built on a clean 3-tier serverless model featuring a static web frontend (HTML/CSS/JS), a Google Apps Script REST API layer with central RBAC and atomic mutex locks, and Google Sheets as the cloud persistence engine.
+
+> [!IMPORTANT]
+> **Demo Credentials**: Default credentials (`admin@synora.io`, password `admin`) are provided strictly for sandbox testing and local demonstration. In production, change all passwords immediately.
 
 ---
 

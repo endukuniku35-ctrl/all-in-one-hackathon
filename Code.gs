@@ -858,18 +858,16 @@ function generateStrongQrToken(teamId) {
 
 /**
  * Validates the cryptographic signature and format of a QR token.
- * Returns true if valid, or throws if forged/tampered.
+ * Strictly enforces HMAC-SHA256 signature and timestamp expiry (48h).
+ * Rejects legacy unsigned tokens.
  */
 function verifyQrTokenIntegrity(token) {
   if (!token) throw new Error("INVALID_QR: QR token is required.");
   token = String(token).trim();
 
-  // Backward compatibility check for legacy tokens
+  // Strictly enforce V2 HMAC-signed token format (disallow legacy unsigned tokens)
   if (token.indexOf("HT26-V2-") !== 0) {
-    if (/^HT26-(SEC|ROT)-HT2026\d{3}-[A-F0-9]{16}$/i.test(token)) {
-      return true;
-    }
-    return false;
+    throw new Error("INVALID_QR: Legacy QR tokens are no longer supported. Please present a V2 HMAC-signed badge.");
   }
 
   // Strong V2 format check: HT26-V2-<TEAM_ID>-<NONCE_16>-<TIMESTAMP_HEX>-<HMAC_16>
@@ -889,6 +887,7 @@ function verifyQrTokenIntegrity(token) {
     throw new Error("INVALID_QR_FORMAT: Incomplete cryptographic token parameters.");
   }
 
+  // Cryptographic Signature Verification
   var payload = "HT26:" + teamId.toUpperCase() + ":" + nonce.toUpperCase() + ":" + ts.toUpperCase();
   var secret = getQrSigningKey();
   var sigBytes = Utilities.computeHmacSha256Signature(payload, secret);
@@ -898,6 +897,17 @@ function verifyQrTokenIntegrity(token) {
 
   if (sig.toUpperCase() !== expectedSig) {
     throw new Error("INVALID_QR_SIGNATURE: This QR badge failed cryptographic integrity verification (tampered or forged).");
+  }
+
+  // Timestamp Expiry Enforcement (Max 48 Hours)
+  var tokenTime = parseInt(ts, 16) * 1000;
+  var now = new Date().getTime();
+  var age = now - tokenTime;
+  var maxAgeMs = (SECURITY.QR_EXPIRY_HOURS || 48) * 60 * 60 * 1000;
+
+  // Allow up to 2 minutes clock skew in the future, reject anything older than maxAgeMs
+  if (age < -120000 || age > maxAgeMs) {
+    throw new Error("QR_EXPIRED: This QR badge has expired (validity window is " + (SECURITY.QR_EXPIRY_HOURS || 48) + " hours).");
   }
 
   return true;
@@ -1121,6 +1131,11 @@ function submitTeamProblemDetails(arg1, arg2, arg3, arg4, arg5) {
   });
 }
 
+/**
+ * updateTeam — Privileged operation restricted to authenticated Admin/Organizer.
+ * Students/teams CANNOT use this route to edit submitted details.
+ * When Admin/Organizer updates a locked team, an explicit override audit log is recorded.
+ */
 function updateTeam(ss, data) {
   return withScriptLock(function() {
     ss = ss || getSpreadsheet();
@@ -1132,6 +1147,7 @@ function updateTeam(ss, data) {
 
     for (var i = 1; i < dataRange.length; i++) {
       if (dataRange[i][0] === data.teamId) {
+        var isLocked = (dataRange[i][21] === true || dataRange[i][21] === "true" || dataRange[i][22] === true || dataRange[i][22] === "true");
         if (data.teamName) sheet.getRange(i + 1, 2).setValue(data.teamName);
         if (data.projectTitle) sheet.getRange(i + 1, 3).setValue(data.projectTitle);
         if (data.domain) sheet.getRange(i + 1, 4).setValue(data.domain);
@@ -1142,8 +1158,12 @@ function updateTeam(ss, data) {
         if (data.leaderEmail) sheet.getRange(i + 1, 9).setValue(data.leaderEmail);
         if (data.leaderPhone) sheet.getRange(i + 1, 10).setValue(data.leaderPhone);
         invalidateAllCaches();
-        logActivity(ss, data._session.UserID, data._session.Name, data._session.Role, "Team Updated", "Modified team " + data.teamId);
-        return { success: true, teamId: data.teamId };
+        var session = data._session || { UserID: "system", Name: "Admin", Role: "admin" };
+        var logDetail = isLocked 
+          ? ("Admin/Organizer override update on LOCKED team " + data.teamId)
+          : ("Modified team " + data.teamId);
+        logActivity(ss, session.UserID, session.Name, session.Role, isLocked ? "Admin Team Override" : "Team Updated", logDetail);
+        return { success: true, teamId: data.teamId, overridden: isLocked };
       }
     }
     throw new Error("TEAM_NOT_FOUND: Team " + data.teamId + " not found.");
@@ -1691,15 +1711,16 @@ function verifyCertificate(ss, data) {
   data = data || {};
   var certId = (data.certId || data.certificateId || data.id || "").trim().toUpperCase();
 
-  if (!certId) throw new Error("CERTIFICATE_NOT_FOUND: Certificate ID is required for verification.");
+  if (!certId) throw new Error("CERTIFICATE_NOT_FOUND: Certificate ID or verification token is required for verification.");
 
   var certs = getSheetObjects(ss.getSheetByName(SHEETS.CERTIFICATES));
   var foundCert = certs.find(function(c) { 
-    return (c.CertificateID && c.CertificateID.toUpperCase() === certId) || (c.TeamID && c.TeamID.toUpperCase() === certId); 
+    return (c.CertificateID && c.CertificateID.toUpperCase() === certId) || 
+           (c.VerificationToken && c.VerificationToken.toUpperCase() === certId); 
   });
 
   if (!foundCert) {
-    throw new Error("CERTIFICATE_NOT_FOUND: No certificate record found for ID: " + certId);
+    throw new Error("CERTIFICATE_NOT_FOUND: No certificate record found for ID/Token: " + certId);
   }
 
   if (String(foundCert.Status).toUpperCase() !== "VALID" && String(foundCert.Status).toUpperCase() !== "RELEASED") {
