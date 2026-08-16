@@ -114,43 +114,23 @@
 
     async function performVerification(certId) {
       const container = document.getElementById('verifyResultContainer');
-      container.innerHTML = `<div class="text-center py-4"><span class="spinner-border spinner-border-sm text-info"></span> Verifying cryptographic signatures in Google Cloud...</div>`;
+      container.innerHTML = `<div class="text-center py-4"><span class="spinner-border spinner-border-sm text-info"></span> Verifying cryptographic credentials in Google Cloud...</div>`;
 
       try {
-        const teams = await API.request('getTeams');
-        const certs = await API.request('getCertificates');
+        const res = await API.request('verifyCertificate', { certId: certId.trim() });
+        const cert = (res && res.certificate) ? res.certificate : res;
 
-        // Match certificate by ID or Team ID
-        let foundCert = certs.find(c => (c.certId && c.certId.toLowerCase() === certId.toLowerCase()) || (c.teamId && c.teamId.toLowerCase() === certId.toLowerCase()));
-        let matchedTeam = null;
-
-        if (foundCert) {
-          matchedTeam = teams.find(t => t.teamId === foundCert.teamId);
-        } else {
-          matchedTeam = teams.find(t => t.teamId.toLowerCase() === certId.toLowerCase() || (t.leaderEmail && t.leaderEmail.toLowerCase() === certId.toLowerCase()));
-          if (matchedTeam) {
-            foundCert = {
-              certId: certId.startsWith('CERT-') ? certId : `CERT-HT-2026-${matchedTeam.teamId.replace('HT', '')}-LDR`,
-              teamId: matchedTeam.teamId,
-              teamName: matchedTeam.teamName,
-              participantName: matchedTeam.leaderName,
-              role: "Team Leader",
-              status: "RELEASED",
-              releasedAt: "16-AUG-2026"
-            };
-          }
+        if (!cert || !cert.CertificateID) {
+          throw new Error("No certificate record found for ID: " + certId);
         }
 
-        if (!matchedTeam) {
-          container.innerHTML = `
-            <div class="verify-card text-center border-danger">
-              <i class="bi bi-x-octagon-fill fs-1 text-danger mb-2"></i>
-              <h4 class="fw-bold text-danger">Invalid Certificate Record</h4>
-              <p class="text-secondary mb-0">No matching credential was found for ID <code class="mono text-white">${certId}</code> in the official registry.</p>
-            </div>
-          `;
-          return;
-        }
+        const id = cert.CertificateID || certId;
+        const name = cert.ParticipantName || "Participant";
+        const role = cert.Role || "Team Member";
+        const teamName = cert.TeamName || "Hackathon Team";
+        const teamId = cert.TeamID || "";
+        const achievement = cert.Achievement || "Participation";
+        const issuedAt = cert.IssuedAt || "August 16, 2026";
 
         container.innerHTML = `
           <div class="verify-card" style="border-left: 5px solid #10B981;">
@@ -158,52 +138,55 @@
               <span class="verify-badge-authentic">
                 <i class="bi bi-patch-check-fill fs-5"></i> Official Verified Credential
               </span>
-              <span class="badge bg-primary fs-6 mono">${foundCert.certId || certId}</span>
+              <span class="badge bg-primary fs-6 mono">${id}</span>
             </div>
 
-            <h3 class="fw-bold text-white mb-1">${foundCert.participantName || matchedTeam.leaderName}</h3>
-            <p class="text-info fw-semibold mb-3">${foundCert.role || 'Validated Hackathon Innovator'}</p>
+            <h3 class="fw-bold text-white mb-1">${name}</h3>
+            <p class="text-info fw-semibold mb-3">${role} • <span class="badge bg-warning text-dark">${achievement}</span></p>
 
             <div class="p-3 bg-subtle rounded border border-secondary mb-3">
               <div class="row g-2">
                 <div class="col-sm-6">
                   <div class="small text-muted text-uppercase fw-bold">Team Name</div>
-                  <div class="fw-bold text-white">${matchedTeam.teamName}</div>
+                  <div class="fw-bold text-white">${teamName}</div>
+                </div>
+                ${teamId ? `
+                  <div class="col-sm-6">
+                    <div class="small text-muted text-uppercase fw-bold">Team ID</div>
+                    <div class="mono text-white">${teamId}</div>
+                  </div>
+                ` : ''}
+                <div class="col-sm-6">
+                  <div class="small text-muted text-uppercase fw-bold">Status</div>
+                  <div class="text-success fw-bold">✓ VALID &amp; REGISTERED</div>
                 </div>
                 <div class="col-sm-6">
-                  <div class="small text-muted text-uppercase fw-bold">Team ID</div>
-                  <div class="mono text-white">${matchedTeam.teamId}</div>
-                </div>
-                <div class="col-sm-6">
-                  <div class="small text-muted text-uppercase fw-bold">Institution / College</div>
-                  <div class="text-white">${matchedTeam.college}</div>
-                </div>
-                <div class="col-sm-6">
-                  <div class="small text-muted text-uppercase fw-bold">Domain Track</div>
-                  <div class="badge bg-secondary">${matchedTeam.domain || 'Innovation'}</div>
-                </div>
-                <div class="col-12 mt-2">
-                  <div class="small text-muted text-uppercase fw-bold">Project Title</div>
-                  <div class="text-info">"${matchedTeam.projectTitle || 'Autonomous Innovation Prototype'}"</div>
+                  <div class="small text-muted text-uppercase fw-bold">Issuing Authority</div>
+                  <div class="text-light">Synora Innovation Council</div>
                 </div>
               </div>
             </div>
 
             <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 text-muted small">
-              <div><b>Issuing Body:</b> Synora Council of Technology &amp; Innovation</div>
-              <div><b>Issue Date:</b> ${foundCert.releasedAt || 'August 16, 2026'}</div>
+              <div><b>Issuing Body:</b> Synora Flagship Hackathon</div>
+              <div><b>Issue Date:</b> ${issuedAt}</div>
             </div>
 
             <div class="d-flex justify-content-end gap-2 mt-4">
-              <a href="certificate.html?teamId=${matchedTeam.teamId}&name=${encodeURIComponent(foundCert.participantName || matchedTeam.leaderName)}&role=${encodeURIComponent(foundCert.role || 'Team Leader')}&certId=${encodeURIComponent(foundCert.certId || certId)}" class="btn btn-primary btn-sm">
-                <i class="bi bi-file-earmark-pdf-fill"></i> View &amp; Print Certificate
+              <a href="certificate.html?teamId=${teamId}&name=${encodeURIComponent(name)}&role=${encodeURIComponent(role)}&certId=${encodeURIComponent(id)}" class="btn btn-primary btn-sm">
+                <i class="bi bi-file-earmark-pdf-fill"></i> View Printable Certificate
               </a>
             </div>
           </div>
         `;
-
       } catch (err) {
-        container.innerHTML = `<div class="alert alert-danger">${err.message}</div>`;
+        container.innerHTML = `
+          <div class="verify-card text-center border-danger">
+            <i class="bi bi-x-octagon-fill fs-1 text-danger mb-2"></i>
+            <h4 class="fw-bold text-danger">Invalid Certificate Record</h4>
+            <p class="text-secondary mb-0">${err.message || 'No matching credential was found in the official registry.'}</p>
+          </div>
+        `;
       }
     }
   </script>

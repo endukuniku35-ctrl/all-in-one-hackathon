@@ -134,6 +134,8 @@ const Organizer = {
           document.getElementById('regSuccessTeamName').textContent = newTeam.teamName;
           document.getElementById('regSuccessTeamId').textContent = newTeam.teamId;
           document.getElementById('regSuccessToken').textContent = newTeam.qrCodeToken;
+          const elPass = document.getElementById('regSuccessPassword');
+          if (elPass) elPass.textContent = newTeam.teamPassword || "N/A";
 
           let portalUrl = "";
           if (CONFIG.API_URL && CONFIG.API_URL.startsWith("http")) {

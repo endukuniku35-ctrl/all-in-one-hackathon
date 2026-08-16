@@ -14,8 +14,13 @@ const CONFIG = {
   // Mode: "production" enforces Google Apps Script API calls; "development" allows local sandbox
   MODE: "production",
 
+  // DEMO_MODE: Set to true ONLY for offline development/presentation without a live backend.
+  // When false (production), any backend failure throws a clear error instead of silently
+  // falling back to localStorage. This prevents data loss during live hackathon events.
+  DEMO_MODE: false,
+
   // Google Apps Script Web App API URL
-  API_URL: "https://script.google.com/macros/s/AKfycbwqDsUsEV6D-K1WSPNdeVXWZ9wKZZcf5Z2YGwoY1zqYnVzAwwR3m_sFHZbaBhwBIGoj/exec", // Live Google Cloud API
+  API_URL: "https://script.google.com/macros/s/AKfycbwCqpF_qDxaWExSeKW-BSCCT1Ybkhy6qddhf4Ziz0uP9EGDX66ak9xk8kQz2HE0uKo/exec", // Live Google Cloud API
 
   // Exactly Two Independent Judging Rounds (100 Marks Each, Total 200)
   ROUNDS: {

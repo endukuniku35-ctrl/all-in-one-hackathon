@@ -89,8 +89,29 @@ const Admin = {
           toggle.checked = (c.status === 'active');
         }
       });
+
+      // Load current stage from settings
+      const settings = await API.request('getSettings');
+      let currentStage = 'REGISTRATION';
+      if (Array.isArray(settings)) {
+        const stage = settings.find(s => s.Setting === 'CURRENT_STAGE' || s.Setting === 'currentStage');
+        if (stage) currentStage = stage.Value;
+      } else if (settings) {
+        currentStage = settings.CURRENT_STAGE || settings.currentStage || 'REGISTRATION';
+      }
+      const select = document.getElementById('select-current-stage');
+      if (select) select.value = currentStage;
     } catch (e) {
       console.error("Error loading workflow status", e);
+    }
+  },
+
+  async updateGlobalStage(stageValue) {
+    try {
+      await API.request('updateSettings', { settings: { CURRENT_STAGE: stageValue, currentStage: stageValue } });
+      Utils.showToast(`✓ Global Hackathon Stage updated to: ${stageValue}`, 'success');
+    } catch (e) {
+      Utils.showToast("Failed to update global stage: " + e.message, 'danger');
     }
   },
 

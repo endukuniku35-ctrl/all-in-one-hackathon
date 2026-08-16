@@ -151,36 +151,37 @@ const Utils = {
     if (!el) return;
     el.innerHTML = "";
 
-    try {
-      if (typeof QRCode !== "undefined") {
-        const correctLevel = (typeof QRCode.CorrectLevel !== "undefined" && typeof QRCode.CorrectLevel.H !== "undefined")
-          ? QRCode.CorrectLevel.H
-          : 2;
-        new QRCode(el, {
-          text: text,
-          width: width,
-          height: height,
-          colorDark: "#0F172A",
-          colorLight: "#FFFFFF",
-          correctLevel: correctLevel
-        });
-        return;
-      }
-    } catch (err) {
-      console.warn("QRCode JS rendering error, using fallback renderer:", err);
-    }
+    const textStr = String(text || "").trim();
+    if (!textStr) return;
 
-    // High-reliability inline fallback image renderer
-    el.innerHTML = `
-      <div style="display:flex; justify-content:center; align-items:center; flex-direction:column; padding:8px;">
-        <img src="https://api.qrserver.com/v1/create-qr-code/?size=${width}x${height}&data=${encodeURIComponent(text)}" 
-             alt="QR Code" style="width:${width}px; height:${height}px; max-width:100%; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,0.12);" 
-             onerror="this.style.display='none'; this.nextElementSibling.style.display='block';" />
-        <div style="display:none; padding:10px; font-size:11px; color:#0F172A; word-break:break-all; text-align:center;">
-          <b>QR Pass Payload:</b><br/>${text}
-        </div>
-      </div>
-    `;
+    // Direct, universally compatible image rendering with dual CDN fail-safe
+    const wrapper = document.createElement("div");
+    wrapper.style.display = "flex";
+    wrapper.style.justifyContent = "center";
+    wrapper.style.alignItems = "center";
+    wrapper.style.padding = "4px";
+
+    const img = document.createElement("img");
+    img.alt = "QR Pass";
+    img.style.width = width + "px";
+    img.style.height = height + "px";
+    img.style.maxWidth = "100%";
+    img.style.display = "block";
+    img.style.borderRadius = "6px";
+    img.style.boxShadow = "0 2px 8px rgba(0,0,0,0.15)";
+
+    const primarySrc = `https://api.qrserver.com/v1/create-qr-code/?size=${width}x${height}&data=${encodeURIComponent(textStr)}`;
+    const fallbackSrc = `https://quickchart.io/qr?text=${encodeURIComponent(textStr)}&size=${width}`;
+
+    img.onerror = function() {
+      if (this.src !== fallbackSrc) {
+        this.src = fallbackSrc;
+      }
+    };
+    img.src = primarySrc;
+
+    wrapper.appendChild(img);
+    el.appendChild(wrapper);
   },
 
   formatDate(dateStr) {

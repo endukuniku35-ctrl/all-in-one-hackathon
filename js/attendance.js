@@ -110,18 +110,24 @@ const Attendance = {
     const session = Auth.getSession();
     const resultBox = document.getElementById('scanResultContainer');
 
-    // Clean up input: If scanned text is a full URL, extract teamId or token query parameter!
+    // Clean up input: If scanned text is a full URL, extract token or teamId query parameter!
     let cleanedId = (teamIdOrToken || "").trim();
+    let extractedToken = "";
+    let extractedTeamId = "";
+
     if (cleanedId.includes("?")) {
       try {
         const urlParams = new URLSearchParams(cleanedId.substring(cleanedId.indexOf("?")));
-        cleanedId = urlParams.get("teamId") || urlParams.get("token") || cleanedId;
+        extractedToken = urlParams.get("token") || urlParams.get("qrToken") || "";
+        extractedTeamId = urlParams.get("teamId") || "";
+        cleanedId = extractedToken || extractedTeamId || cleanedId;
       } catch (e) {}
     }
 
     try {
       const res = await API.request('markAttendance', {
         teamId: cleanedId,
+        qrToken: extractedToken || cleanedId,
         markedBy: session ? session.name : "Organizer Desk"
       });
 
@@ -166,7 +172,7 @@ const Attendance = {
     } catch (err) {
       this.playBeep(false);
       Utils.showToast(err.message || "Error processing check-in", "danger");
-    }  if (resultBox) {
+      if (resultBox) {
         resultBox.innerHTML = `
           <div class="alert alert-danger border-danger d-flex align-items-center gap-3">
             <i class="bi bi-x-circle-fill fs-3 text-danger"></i>

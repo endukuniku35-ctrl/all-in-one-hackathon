@@ -6,13 +6,23 @@
 const API = {
   initLocalStore() {
     if (!localStorage.getItem(CONFIG.STORAGE_KEYS.TEAMS)) {
+      const teams = DEMO_DATA.teams.map(t => {
+        const cleanTeamName = t.teamName.replace(/[^a-zA-Z0-9]/g, "");
+        const cleanLeaderName = (t.leaderName || "").replace(/[^a-zA-Z0-9]/g, "");
+        const cleanMobile = (t.leaderPhone || "").replace(/\D/g, "");
+        const part1 = cleanTeamName.slice(0, 4);
+        const part2 = cleanLeaderName.slice(0, 4);
+        const part3 = cleanMobile.length >= 4 ? cleanMobile.slice(-4) : cleanMobile;
+        t.teamPassword = part1 + part2 + part3;
+        return t;
+      });
       localStorage.setItem(CONFIG.STORAGE_KEYS.USERS, JSON.stringify(DEMO_DATA.users));
-      localStorage.setItem(CONFIG.STORAGE_KEYS.TEAMS, JSON.stringify(DEMO_DATA.teams));
+      localStorage.setItem(CONFIG.STORAGE_KEYS.TEAMS, JSON.stringify(teams));
       localStorage.setItem(CONFIG.STORAGE_KEYS.ATTENDANCE, JSON.stringify(DEMO_DATA.attendance));
       localStorage.setItem(CONFIG.STORAGE_KEYS.EVALUATIONS_R1, JSON.stringify(DEMO_DATA.evaluations_r1));
       localStorage.setItem(CONFIG.STORAGE_KEYS.EVALUATIONS_R2, JSON.stringify(DEMO_DATA.evaluations_r2));
       localStorage.setItem(CONFIG.STORAGE_KEYS.ROUND_CONFIG, JSON.stringify(DEMO_DATA.roundConfig));
-      localStorage.setItem(CONFIG.STORAGE_KEYS.SETTINGS, JSON.stringify(DEMO_DATA.settings));
+      localStorage.setItem(CONFIG.STORAGE_KEYS.SETTINGS, JSON.stringify({ ...DEMO_DATA.settings, currentStage: "REGISTRATION" }));
       localStorage.setItem(CONFIG.STORAGE_KEYS.ACTIVITY_LOGS, JSON.stringify(DEMO_DATA.activityLogs));
 
       const certs = [];
@@ -111,14 +121,27 @@ const API = {
         }
       }
 
-      // If all retries were exhausted and not a fatal auth/validation error, fall back to local store
-      if (lastError && !lastError.message.includes("Failed to fetch") && !lastError.message.includes("aborted")) {
-        throw lastError;
+      // All retries exhausted.
+      // In production mode (DEMO_MODE off), throw an error — never silently swap to a local database.
+      // This prevents judges/organizers from believing data was saved when the backend was unreachable.
+      if (!CONFIG.DEMO_MODE) {
+        throw new Error(
+          "BACKEND_UNAVAILABLE: The cloud backend could not be reached after " + MAX_RETRIES + " attempts. " +
+          "Please check your internet connection and try again. Do NOT refresh — your data has NOT been saved."
+        );
       }
+
+      // DEMO_MODE only: fall back to local store for offline development
+      console.warn("[HackTrack] Backend unreachable — falling back to local demo store (DEMO_MODE).");
     }
 
-    // Local state fallback for offline dev mode
-    return this.handleLocalAction(action, payload);
+    // DEMO_MODE: local state fallback for offline / offline dev mode
+    if (CONFIG.DEMO_MODE || !CONFIG.API_URL || !CONFIG.API_URL.trim().startsWith("http")) {
+      return this.handleLocalAction(action, payload);
+    }
+
+    // Should not reach here in production
+    throw new Error("CONFIGURATION_ERROR: No API URL configured and DEMO_MODE is not enabled.");
   },
 
   handleLocalAction(action, data) {
@@ -216,6 +239,14 @@ const API = {
         const qrCodeToken = `HT26-V2-${teamId}-${nonce}-${tsHex}-${sig}`;
         const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
 
+        const cleanTeamName = teamName.replace(/\s+/g, "");
+        const cleanLeaderName = (data.leaderName || "").replace(/\s+/g, "");
+        const cleanMobile = (data.leaderPhone || "").replace(/\D+/g, "");
+        const part1 = cleanTeamName.slice(0, 4);
+        const part2 = cleanLeaderName.slice(0, 4);
+        const part3 = cleanMobile.length >= 4 ? cleanMobile.slice(-4) : cleanMobile;
+        const teamPassword = part1 + part2 + part3;
+
         const newTeam = {
           teamId,
           teamName,
@@ -236,6 +267,7 @@ const API = {
           member4Name: data.member4Name || "",
           member4Email: data.member4Email || "",
           member4Phone: data.member4Phone || "",
+          teamPassword,
           status: "present",
           locked: true,
           problemSubmitted: false,
@@ -246,31 +278,55 @@ const API = {
 
         teams.unshift(newTeam);
         localStorage.setItem(CONFIG.STORAGE_KEYS.TEAMS, JSON.stringify(teams));
-        this.logActivity("Team Registered", `Registered team ${teamName} (${teamId}) via Organizer Desk.`);
+        this.logActivity("Team Registered", `Registered team ${teamName} (${teamId}) via Organizer Desk. Password: ${teamPassword}`);
         return newTeam;
       }
 
-      case "submitTeamProblemDetails": {
+      case "submitTeamProblemDetails":
+      case "submitTeamProblemDetailsVerified": {
         let teams = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.TEAMS) || "[]");
-        const identifier = data.teamId || data.token;
+        const identifier = data.teamId || data.token || data.qrCodeToken;
         const index = teams.findIndex(t => t.teamId === identifier || t.qrCodeToken === identifier);
 
         if (index === -1) throw new Error("Team not found.");
 
         if (teams[index].submissionLocked) {
-          throw new Error("This team has already submitted their problem statement. Submission is locked.");
+          throw new Error("This team has already submitted their problem statement. Submission is permanently locked.");
         }
 
-        teams[index].projectTitle = data.projectTitle || teams[index].projectTitle;
+        const email = (data.password || data.confirmPassword || data.email || data.verifiedEmail || "").trim().toLowerCase();
+        if (action === "submitTeamProblemDetailsVerified" && !email) {
+          throw new Error("AUTH_REQUIRED: Registered email is required to lock in submission.");
+        }
+
+        if (email) {
+          const team = teams[index];
+          const users = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.USERS) || "[]");
+          const callerUser = users.find(u => u.email.toLowerCase() === email);
+          const isAdminOrOrganizer = callerUser && (callerUser.role === "admin" || callerUser.role === "organizer");
+
+          if (!isAdminOrOrganizer) {
+            const isLeader = team.leaderEmail && team.leaderEmail.toLowerCase() === email;
+            const isM2 = team.member2Email && team.member2Email.toLowerCase() === email;
+            const isM3 = team.member3Email && team.member3Email.toLowerCase() === email;
+            const isM4 = team.member4Email && team.member4Email.toLowerCase() === email;
+
+            if (!isLeader && !isM2 && !isM3 && !isM4) {
+              throw new Error("ACCESS_DENIED: The email '" + email + "' is not registered for this team.");
+            }
+          }
+        }
+
+        teams[index].projectTitle = data.projectTitle || data.title || teams[index].projectTitle;
         teams[index].domain = data.domain || teams[index].domain;
-        teams[index].problemStatement = data.problemStatement || teams[index].problemStatement;
+        teams[index].problemStatement = data.problemStatement || data.ps || teams[index].problemStatement;
         teams[index].githubUrl = data.githubUrl || teams[index].githubUrl || "";
         teams[index].demoUrl = data.demoUrl || teams[index].demoUrl || "";
         teams[index].problemSubmitted = true;
         teams[index].submissionLocked = true;
 
         localStorage.setItem(CONFIG.STORAGE_KEYS.TEAMS, JSON.stringify(teams));
-        this.logActivity("Problem Statement Submitted", `Team ${teams[index].teamName} locked in statement: ${data.problemStatement}`);
+        this.logActivity("Problem Statement Submitted", `Team ${teams[index].teamName} locked in statement${verifiedEmail ? " by " + verifiedEmail : ""}.`);
         return teams[index];
       }
 
@@ -579,8 +635,174 @@ const API = {
         settings.isCertificateSystemEnabled = true;
         localStorage.setItem(CONFIG.STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
         localStorage.setItem(CONFIG.STORAGE_KEYS.CERTIFICATES, JSON.stringify(certs));
-        this.logActivity("Certificates Released", "Batch released official certificates for all verified teams and members.");
         return { success: true, count: certs.length };
+      }
+
+      case "verifyCertificate": {
+        const certId = (data.certId || data.certificateId || data.id || "").trim().toUpperCase();
+        const verifyToken = (data.token || data.verificationToken || "").trim().toUpperCase();
+
+        if (!certId) throw new Error("CERTIFICATE_NOT_FOUND: Certificate ID is required for verification.");
+
+        const certs = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.CERTIFICATES) || "[]");
+        const teams = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.TEAMS) || "[]");
+
+        let foundCert = certs.find(c => (c.certId && c.certId.toUpperCase() === certId) || (c.CertificateID && c.CertificateID.toUpperCase() === certId));
+
+        if (!foundCert) {
+          throw new Error("CERTIFICATE_NOT_FOUND: No certificate found for ID: " + certId);
+        }
+
+        if (verifyToken && foundCert.verificationToken && foundCert.verificationToken.toUpperCase() !== verifyToken) {
+          throw new Error("CERTIFICATE_INVALID: Verification token does not match.");
+        }
+
+        const team = teams.find(t => t.teamId === (foundCert.teamId || foundCert.TeamID)) || {};
+
+        return {
+          valid: true,
+          certificate: {
+            CertificateID: foundCert.certId || foundCert.CertificateID,
+            ParticipantName: foundCert.participantName || foundCert.ParticipantName,
+            Role: foundCert.role || foundCert.Role || "Team Member",
+            TeamID: foundCert.teamId || foundCert.TeamID,
+            TeamName: foundCert.teamName || foundCert.TeamName || team.teamName || "",
+            Achievement: foundCert.achievement || foundCert.Achievement || "Participation",
+            Status: foundCert.status || foundCert.Status || "VALID",
+            IssuedAt: foundCert.releasedAt || foundCert.IssuedAt || ""
+          }
+        };
+      }
+
+      case "getCurrentStage": {
+        const settings = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.SETTINGS) || "{}");
+        return { success: true, stage: settings.CURRENT_STAGE || settings.currentStage || "REGISTRATION" };
+      }
+
+      case "authenticateTeam": {
+        const teamId = (data.teamId || "").trim().toUpperCase();
+        const password = (data.password || "").trim();
+        const teams = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.TEAMS) || "[]");
+        const team = teams.find(t => t.teamId === teamId);
+        if (!team) return { success: true, authenticated: false };
+        const expected = (team.teamPassword || "").trim();
+        return { success: true, authenticated: expected && expected === password };
+      }
+
+      case "getTeamPortalData": {
+        const teamId = (data.teamId || "").trim().toUpperCase();
+        const password = (data.password || "").trim();
+        const teams = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.TEAMS) || "[]");
+        const team = teams.find(t => t.teamId === teamId);
+        if (!team) throw new Error("TEAM_NOT_FOUND: Team not found.");
+        const expected = (team.teamPassword || "").trim();
+        if (expected !== password) throw new Error("INVALID_PASSWORD: Incorrect password.");
+
+        const settings = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.SETTINGS) || "{}");
+        const stage = settings.CURRENT_STAGE || settings.currentStage || "REGISTRATION";
+        const pStatus = (team.submissionLocked || team.problemSubmitted) ? "SUBMITTED" : "NOT_SUBMITTED";
+
+        if (stage === "REGISTRATION") {
+          return {
+            success: true,
+            stage: "REGISTRATION",
+            team: {
+              teamId: team.teamId,
+              teamName: team.teamName,
+              leader: team.leaderName,
+              members: [team.leaderName, team.member2Name, team.member3Name, team.member4Name].filter(Boolean),
+              status: team.status || "Successfully Registered"
+            }
+          };
+        }
+
+        if (stage === "PROBLEM_STATEMENT") {
+          if (pStatus === "NOT_SUBMITTED") {
+            return {
+              success: true,
+              stage: "PROBLEM_STATEMENT",
+              status: "NOT_SUBMITTED",
+              team: {
+                teamId: team.teamId,
+                teamName: team.teamName,
+                leader: team.leaderName
+              }
+            };
+          } else {
+            return {
+              success: true,
+              stage: "PROBLEM_STATEMENT",
+              status: "SUBMITTED",
+              team: {
+                teamId: team.teamId,
+                teamName: team.teamName,
+                leader: team.leaderName,
+                problemStatement: team.projectTitle || "",
+                problemDescription: team.problemStatement || "",
+                technology: team.domain || "",
+                submissionTime: team.createdAt || new Date().toLocaleString()
+              },
+              message: "Problem statement submitted successfully."
+            };
+          }
+        }
+
+        if (stage === "CERTIFICATE") {
+          return {
+            success: true,
+            stage: "CERTIFICATE",
+            certificate: team.certificateUrl || "certificate.html?certId=CERT-MOCK-" + team.teamId
+          };
+        }
+
+        throw new Error("UNKNOWN_STAGE");
+      }
+
+      case "submitProblemStatement": {
+        const teamId = (data.teamId || "").trim().toUpperCase();
+        const password = (data.password || "").trim();
+        const payload = data.data || data;
+
+        let teams = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.TEAMS) || "[]");
+        const index = teams.findIndex(t => t.teamId === teamId);
+        if (index === -1) throw new Error("TEAM_NOT_FOUND");
+
+        const team = teams[index];
+        const expected = (team.teamPassword || "").trim();
+        if (expected !== password) throw new Error("INVALID_PASSWORD");
+
+        const settings = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.SETTINGS) || "{}");
+        const stage = settings.CURRENT_STAGE || settings.currentStage || "REGISTRATION";
+        if (stage !== "PROBLEM_STATEMENT") throw new Error("STAGE_LOCKED");
+
+        if (team.submissionLocked) throw new Error("SUBMISSION_LOCKED");
+
+        teams[index].projectTitle = payload.problemStatement;
+        teams[index].problemStatement = payload.problemDescription;
+        teams[index].domain = payload.technology;
+        teams[index].problemSubmitted = true;
+        teams[index].submissionLocked = true;
+
+        localStorage.setItem(CONFIG.STORAGE_KEYS.TEAMS, JSON.stringify(teams));
+        return { success: true, message: "Problem statement locked." };
+      }
+
+      case "getCertificate": {
+        const teamId = (data.teamId || "").trim().toUpperCase();
+        const password = (data.password || "").trim();
+        const teams = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.TEAMS) || "[]");
+        const team = teams.find(t => t.teamId === teamId);
+        if (!team) throw new Error("TEAM_NOT_FOUND");
+        const expected = (team.teamPassword || "").trim();
+        if (expected !== password) throw new Error("INVALID_PASSWORD");
+        return { success: true, certificate: team.certificateUrl || "certificate.html?certId=CERT-MOCK-" + team.teamId };
+      }
+
+      case "verifyAndLoadTeamPortal": {
+        return this.request("getTeamPortalData", {
+          teamId: data.token || data.teamId,
+          password: data.email || data.password
+        });
       }
 
       case "getActivityLogs": {
