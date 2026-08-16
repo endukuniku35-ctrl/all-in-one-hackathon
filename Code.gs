@@ -1230,7 +1230,7 @@ function markAttendance(ss, data) {
 
     if (!rawId) throw new Error("VALIDATION_ERROR: Team ID or QR token is required.");
 
-    // Cryptographic signature check for V2 tokens
+    // Cryptographic signature check for V2 tokens (primary check-in path)
     if (usedQrToken && usedQrToken.indexOf("HT26-V2-") === 0) {
       verifyQrTokenIntegrity(usedQrToken);
     }
@@ -1238,11 +1238,23 @@ function markAttendance(ss, data) {
     var teams = getTeams(ss);
     var foundTeam = null;
 
+    // Primary lookup: by QR token
     for (var i = 0; i < teams.length; i++) {
       var t = teams[i];
-      if (t.teamId === rawId || t.qrCodeToken === rawId || (t.teamName && t.teamName.toLowerCase() === rawId.toLowerCase())) {
+      if (t.qrCodeToken === rawId) {
         foundTeam = t;
         break;
+      }
+    }
+
+    // Fallback lookup by Team ID or Team Name — restricted to admin/organizer only
+    if (!foundTeam && session && (String(session.Role).toLowerCase() === "admin" || String(session.Role).toLowerCase() === "organizer")) {
+      for (var j = 0; j < teams.length; j++) {
+        var t2 = teams[j];
+        if (t2.teamId === rawId || (t2.teamName && t2.teamName.toLowerCase() === rawId.toLowerCase())) {
+          foundTeam = t2;
+          break;
+        }
       }
     }
 
@@ -2007,16 +2019,15 @@ function verifyAndLoadTeamPortal(token, emailEntered) {
     throw new Error("Please enter your registered email address to access your team pass.");
   }
 
-  // Cryptographic signature check for V2 tokens on presentation
-  if (token && token.indexOf("HT26-V2-") === 0) {
-    verifyQrTokenIntegrity(token);
-  }
+  // SECURITY: Always validate cryptographic QR token (HMAC + 48h expiry)
+  // Raw Team IDs (e.g. HT2026001) are not accepted as portal credentials
+  verifyQrTokenIntegrity(token);
 
-  // Find team by QR token OR by Team ID
+  // Find team strictly by QR token (not by raw Team ID)
   var teams = getTeams(ss, { _internal: true });
   var team = null;
   for (var i = 0; i < teams.length; i++) {
-    if (teams[i].qrCodeToken === token || teams[i].teamId === token) {
+    if (teams[i].qrCodeToken === token) {
       team = teams[i];
       break;
     }
@@ -2121,11 +2132,25 @@ function renderCloudTeamPortal(teamId, token) {
     ).setTitle("Invalid Pass — Synora'26");
   }
 
-  // Instant server-side lookup
+  // SECURITY: Validate cryptographic QR token (HMAC + 48h expiry) before rendering portal
+  // Only V2 HMAC-signed tokens are accepted; raw Team IDs are rejected
+  try {
+    verifyQrTokenIntegrity(lookupToken);
+  } catch (qrErr) {
+    return HtmlService.createHtmlOutput(
+      '<html><body style="background:#070B19;color:#E2E8F0;font-family:system-ui;padding:40px;text-align:center;">' +
+      '<h2 style="color:#EF4444;">⚠ Invalid or Expired QR Pass</h2>' +
+      '<p>' + escapeHtml(qrErr.message) + '</p>' +
+      '<p style="color:#94A3B8;margin-top:20px;">Please present your official QR badge to an organizer for assistance.</p>' +
+      '</body></html>'
+    ).setTitle("Invalid Pass — Synora'26");
+  }
+
+  // Lookup team strictly by QR token (not by raw Team ID)
   var teams = getTeams(ss, { _internal: true });
   var team = null;
   for (var i = 0; i < teams.length; i++) {
-    if (teams[i].teamId === lookupToken || teams[i].qrCodeToken === lookupToken) {
+    if (teams[i].qrCodeToken === lookupToken) {
       team = teams[i];
       break;
     }
