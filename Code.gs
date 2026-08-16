@@ -113,7 +113,13 @@ function doPost(e) {
 }
 
 /**
- * Centralized Action Router with Authentication & Authorization
+ * Centralized Action Router with Mandatory Authentication & Authorization
+ * -----------------------------------------------------------------------
+ * Every endpoint either explicitly allows public access or requires a
+ * valid session + role. The auth() helper:
+ *   1. Calls requireRoleAuth() which THROWS if sessionId is missing/invalid.
+ *   2. Attaches the authenticated session to data._session so that
+ *      downstream functions can derive identity from it.
  */
 function handleAction(action, data, method) {
   action = action || "ping";
@@ -123,125 +129,155 @@ function handleAction(action, data, method) {
   var ss = getSpreadsheet();
   ensureDatabaseStructure(ss);
 
+  // Auth helper: authenticates, authorizes by role, attaches session to data
+  function auth(roles) {
+    var session = requireRoleAuth(ss, data.sessionId, roles);
+    data._session = session;
+    return session;
+  }
+
   switch (action) {
+
+    // ── PUBLIC: Health check ──
     case "ping":
-      return { 
-        status: "ONLINE", 
-        app: "HackTrack Synora'26 Cloud API", 
-        spreadsheetUrl: ss.getUrl(),
-        timestamp: new Date().toISOString() 
+      return {
+        status: "ONLINE",
+        app: "HackTrack Synora'26 Cloud API",
+        timestamp: new Date().toISOString()
       };
 
-    case "initDatabase":
-      return initDatabase(ss);
-
+    // ── PUBLIC: Login / Auth ──
     case "login":
       return handleLogin(ss, data);
 
     case "logout":
       return handleLogout(ss, data);
 
-    case "getDashboardStats":
-      return getDashboardStats(ss, data);
+    case "changePassword":
+      return changePassword(ss, data); // Has own internal session validation
 
-    case "getTeams":
-      return getTeams(ss, data);
+    // ── BOOTSTRAP / MIGRATION: initDatabase ──
+    case "initDatabase":
+      return initDatabase(ss);
 
-    case "getTeam":
-      return getTeam(ss, data.teamId || data.token || data.identifier);
-
-    case "getTeamByQRToken":
-      return getTeamByQRToken(ss, data);
-
-    case "registerTeam":
-      requireRoleAuth(ss, data.sessionId, ["ADMIN", "ORGANIZER"]);
-      return registerTeam(ss, data);
-
-    case "submitTeamProblemDetails":
-      return submitTeamProblemDetails(ss, data);
-
-    case "updateTeam":
-      requireRoleAuth(ss, data.sessionId, ["ADMIN", "ORGANIZER"]);
-      return updateTeam(ss, data);
-
-    case "deleteTeam":
-      requireRoleAuth(ss, data.sessionId, ["ADMIN"]);
-      return deleteTeam(ss, data);
-
-    case "unlockTeam":
-      requireRoleAuth(ss, data.sessionId, ["ADMIN", "ORGANIZER"]);
-      return unlockTeam(ss, data);
-
-    case "markAttendance":
-      return markAttendance(ss, data);
-
-    case "getAttendance":
-      return getAttendance(ss, data);
-
+    // ── ADMIN ONLY ──
     case "getUsers":
+      auth(["ADMIN"]);
       return getUsers(ss, data);
 
     case "createUser":
-      requireRoleAuth(ss, data.sessionId, ["ADMIN"]);
+      auth(["ADMIN"]);
       return createUser(ss, data);
 
     case "deleteUser":
-      requireRoleAuth(ss, data.sessionId, ["ADMIN"]);
+      auth(["ADMIN"]);
       return deleteUser(ss, data);
 
-    case "getRoundConfig":
-      return getRoundConfig(ss, data);
-
-    case "updateRoundStatus":
-      requireRoleAuth(ss, data.sessionId, ["ADMIN", "ORGANIZER"]);
-      return updateRoundStatus(ss, data);
-
-    case "getJudgeAssignments":
-      return getJudgeAssignments(ss, data);
-
     case "saveJudgeAssignments":
-      requireRoleAuth(ss, data.sessionId, ["ADMIN"]);
+      auth(["ADMIN"]);
       return saveJudgeAssignments(ss, data);
 
-    case "submitEvaluation":
-      return submitEvaluation(ss, data);
-
-    case "getLeaderboard":
-      return getLeaderboard(ss, data);
-
     case "declareWinners":
-      requireRoleAuth(ss, data.sessionId, ["ADMIN"]);
+      auth(["ADMIN"]);
       return declareWinners(ss, data);
+
+    case "getActivityLogs":
+      auth(["ADMIN"]);
+      return getActivityLogs(ss, data);
+
+    case "getSettings":
+      auth(["ADMIN"]);
+      return handleSettings(ss, "getSettings", data);
+
+    case "updateSettings":
+      auth(["ADMIN"]);
+      return handleSettings(ss, "updateSettings", data);
+
+    // ── ADMIN + ORGANIZER ──
+    case "getDashboardStats":
+      auth(["ADMIN", "ORGANIZER"]);
+      return getDashboardStats(ss, data);
+
+    case "registerTeam":
+      auth(["ADMIN", "ORGANIZER"]);
+      return registerTeam(ss, data);
+
+    case "submitTeamProblemDetails":
+      auth(["ADMIN", "ORGANIZER"]);
+      return submitTeamProblemDetails(ss, data);
+
+    case "updateTeam":
+      auth(["ADMIN", "ORGANIZER"]);
+      return updateTeam(ss, data);
+
+    case "deleteTeam":
+      auth(["ADMIN"]);
+      return deleteTeam(ss, data);
+
+    case "unlockTeam":
+      auth(["ADMIN", "ORGANIZER"]);
+      return unlockTeam(ss, data);
+
+    case "markAttendance":
+      auth(["ADMIN", "ORGANIZER"]);
+      return markAttendance(ss, data);
+
+    case "getAttendance":
+      auth(["ADMIN", "ORGANIZER"]);
+      return getAttendance(ss, data);
+
+    case "getTeamByQRToken":
+      auth(["ADMIN", "ORGANIZER"]);
+      return getTeamByQRToken(ss, data);
+
+    case "updateRoundStatus":
+      auth(["ADMIN", "ORGANIZER"]);
+      return updateRoundStatus(ss, data);
+
+    case "generateRotatingQR":
+      auth(["ADMIN", "ORGANIZER"]);
+      return generateRotatingQR(ss, data);
 
     case "getCertificates":
     case "releaseCertificates":
+      auth(["ADMIN", "ORGANIZER"]);
       return handleCertificates(ss, action, data);
+
+    // ── ADMIN + ORGANIZER + JUDGE ──
+    case "getTeams":
+      auth(["ADMIN", "ORGANIZER", "JUDGE"]);
+      return getTeams(ss, data);
+
+    case "getTeam":
+      auth(["ADMIN", "ORGANIZER", "JUDGE"]);
+      return getTeam(ss, data.teamId || data.token || data.identifier);
+
+    case "getRoundConfig":
+      auth(["ADMIN", "ORGANIZER", "JUDGE"]);
+      return getRoundConfig(ss, data);
+
+    case "getJudgeAssignments":
+      auth(["ADMIN", "ORGANIZER", "JUDGE"]);
+      return getJudgeAssignments(ss, data);
+
+    // ── JUDGE ONLY ──
+    case "submitEvaluation":
+      auth(["JUDGE"]);
+      return submitEvaluation(ss, data);
+
+    // ── PUBLIC: Designed to be openly accessible ──
+    case "getLeaderboard":
+      return getLeaderboard(ss, data);
 
     case "verifyCertificate":
       return verifyCertificate(ss, data);
 
-    case "getActivityLogs":
-      return getActivityLogs(ss, data);
-
     case "verifyAndLoadTeamPortal":
       return verifyAndLoadTeamPortal(data.token || data.teamId, data.email);
 
-    case "getSettings":
-      return handleSettings(ss, "getSettings", data);
-
-    case "updateSettings":
-      requireRoleAuth(ss, data.sessionId, ["ADMIN"]);
-      return handleSettings(ss, "updateSettings", data);
-
-    case "changePassword":
-      return changePassword(ss, data);
-
-    case "generateRotatingQR":
-      requireRoleAuth(ss, data.sessionId, ["ADMIN", "ORGANIZER"]);
-      return generateRotatingQR(ss, data);
-
+    // ── UNKNOWN ACTION ──
     default:
-      return { status: "ONLINE", action: action, message: "Action executed" };
+      throw new Error("UNKNOWN_ACTION: Action '" + action + "' is not recognized.");
   }
 }
 
@@ -344,10 +380,23 @@ function handleLogin(ss, data) {
     throw new Error("ACCOUNT_INACTIVE: This user account has been disabled. Please contact administrator.");
   }
 
-  // 2. Check password against SHA-256 hash (or plaintext fallback for initial seeds)
+  // 2. Check password against SHA-256 hash
   var inputHash = hashPassword(password);
   var storedHash = String(user.PasswordHash || "");
-  var isMatch = (storedHash === inputHash) || (storedHash === password);
+  var isMatch = (storedHash === inputHash);
+
+  // Self-healing migration: if user has legacy plaintext password, upgrade immediately
+  if (!isMatch && storedHash === password && storedHash.length < 64) {
+    isMatch = true;
+    var userRows = sheet.getDataRange().getValues();
+    for (var ur = 1; ur < userRows.length; ur++) {
+      if (userRows[ur][0] === user.UserID) {
+        sheet.getRange(ur + 1, 4).setValue(inputHash);
+        Logger.log("Self-healed legacy password to SHA-256 for: " + user.Email);
+        break;
+      }
+    }
+  }
 
   if (!isMatch) {
     recordLoginAttempt(ss, email, "FAIL", "Wrong password");
@@ -364,9 +413,6 @@ function handleLogin(ss, data) {
   var session = createSession(ss, user);
   logActivity(ss, user.UserID, user.Name, user.Role, "User Login",
     "Authenticated successfully from session " + session.sessionId.substring(0, 12) + "...");
-
-  // 4. Flag if first login (stored hash still equals plaintext) — prompt password change
-  session.mustChangePassword = (storedHash === password);
 
   return session;
 }
@@ -405,27 +451,53 @@ function createSession(ss, user) {
 function handleLogout(ss, data) {
   ss = ss || getSpreadsheet();
   var sessionId = data.sessionId;
-  if (!sessionId) return { success: true };
+  if (!sessionId) {
+    throw new Error("AUTH_REQUIRED: Session token is required for logout.");
+  }
 
   var sheet = ss.getSheetByName(SHEETS.SESSIONS);
+  if (!sheet) return { success: true };
+
   var dataRange = sheet.getDataRange().getValues();
+  var found = false;
 
   for (var i = 1; i < dataRange.length; i++) {
     if (dataRange[i][0] === sessionId) {
-      sheet.getRange(i + 1, 7).setValue("LOGGED_OUT");
+      // Only allow logout of ACTIVE sessions
+      if (String(dataRange[i][6]).toUpperCase() === "ACTIVE") {
+        sheet.getRange(i + 1, 7).setValue("LOGGED_OUT");
+        logActivity(ss, dataRange[i][1], dataRange[i][2], dataRange[i][3], "User Logout", "Session terminated by user.");
+      }
+      found = true;
       break;
     }
   }
+
+  if (!found) {
+    throw new Error("AUTH_REQUIRED: Session not found or already terminated.");
+  }
+
   return { success: true, message: "Logged out successfully." };
 }
 
+/**
+ * HARD Authentication & Role Authorization.
+ * This function ALWAYS throws if:
+ *   - sessionId is missing
+ *   - sessionId is invalid/logged out/expired
+ *   - user role is not in allowedRoles
+ * Returns the full session object (UserID, Name, Role) on success.
+ */
 function requireRoleAuth(ss, sessionId, allowedRoles) {
+  // ── HARD FAIL: No session = no access ──
   if (!sessionId) {
-    return null; // No session — soft-pass (dev/demo mode), downstream functions enforce context
+    throw new Error("AUTH_REQUIRED: A valid session token is required. Please log in.");
   }
 
   var sheet = ss.getSheetByName(SHEETS.SESSIONS);
-  if (!sheet) return null;
+  if (!sheet) {
+    throw new Error("AUTH_REQUIRED: Session infrastructure not initialized. Run initDatabase first.");
+  }
 
   var sessions = getSheetObjects(sheet);
   var session = null;
@@ -438,12 +510,11 @@ function requireRoleAuth(ss, sessionId, allowedRoles) {
   }
 
   if (!session) {
-    throw new Error("AUTH_REQUIRED: Session token is invalid or has been logged out.");
+    throw new Error("AUTH_REQUIRED: Session token is invalid, expired, or has been logged out.");
   }
 
-  // Enforce session expiry
+  // ── Enforce session expiry ──
   if (session.ExpiresAt && new Date(session.ExpiresAt) < new Date()) {
-    // Mark session expired in sheet
     var dataRange = sheet.getDataRange().getValues();
     for (var j = 1; j < dataRange.length; j++) {
       if (dataRange[j][0] === sessionId) {
@@ -454,11 +525,12 @@ function requireRoleAuth(ss, sessionId, allowedRoles) {
     throw new Error("SESSION_EXPIRED: Your session has expired. Please log in again.");
   }
 
+  // ── Enforce role authorization ──
   if (allowedRoles && Array.isArray(allowedRoles)) {
     var userRole = String(session.Role || "").toUpperCase();
     var allowed = allowedRoles.map(function(r) { return r.toUpperCase(); });
     if (allowed.indexOf(userRole) === -1) {
-      throw new Error("ACCESS_DENIED: Your role (" + userRole + ") is not permitted to perform this operation.");
+      throw new Error("ACCESS_DENIED: Your role (" + userRole + ") is not permitted to perform this operation. Required: " + allowed.join(" or ") + ".");
     }
   }
 
@@ -502,7 +574,7 @@ function changePassword(ss, data) {
   if (userRowIndex === -1) throw new Error("USER_NOT_FOUND: User account not found.");
 
   var currentHash = hashPassword(currentPassword);
-  if (currentHash !== existingHash && currentPassword !== existingHash) {
+  if (currentHash !== existingHash) {
     throw new Error("INVALID_CREDENTIALS: Current password is incorrect.");
   }
 
@@ -610,6 +682,18 @@ function ensureDatabaseStructure(ss) {
       sheet.setFrozenRows(1);
     }
   });
+
+  // Auto-migrate any legacy plaintext passwords to SHA-256 hashes
+  var usersSheet = ss.getSheetByName(SHEETS.USERS);
+  if (usersSheet && usersSheet.getLastRow() > 1) {
+    var userData = usersSheet.getDataRange().getValues();
+    for (var u = 1; u < userData.length; u++) {
+      var stored = String(userData[u][3] || "");
+      if (stored && (stored.length < 64 || !/^[0-9a-f]{64}$/i.test(stored))) {
+        usersSheet.getRange(u + 1, 4).setValue(hashPassword(stored));
+      }
+    }
+  }
 }
 
 function initDatabase(ss) {
@@ -624,6 +708,17 @@ function initDatabase(ss) {
     usersSheet.appendRow(["USR-JDG-01", "Prof. Alan Turing", "judge1@synora.io", defaultHash, "judge", "AI/ML & Deep Learning", "active", "2026-08-15 09:00:00"]);
     usersSheet.appendRow(["USR-JDG-02", "Dr. Grace Hopper", "judge2@synora.io", defaultHash, "judge", "Cloud & Distributed Systems", "active", "2026-08-15 09:15:00"]);
     usersSheet.appendRow(["USR-JDG-03", "Prof. Ada Lovelace", "judge3@synora.io", defaultHash, "judge", "Cyber Security & Cryptography", "active", "2026-08-15 09:30:00"]);
+  } else {
+    // AUTO-MIGRATE: Convert any plaintext passwords to SHA-256 hashes
+    // A SHA-256 hex hash is always exactly 64 hex characters. Anything shorter is plaintext.
+    var userData = usersSheet.getDataRange().getValues();
+    for (var u = 1; u < userData.length; u++) {
+      var stored = String(userData[u][3] || "");
+      if (stored && (stored.length < 64 || !/^[0-9a-f]{64}$/i.test(stored))) {
+        usersSheet.getRange(u + 1, 4).setValue(hashPassword(stored));
+        Logger.log("Migrated plaintext password for user: " + userData[u][0]);
+      }
+    }
   }
 
   var rSheet = ss.getSheetByName(SHEETS.ROUND_CONFIG);
@@ -641,8 +736,9 @@ function initDatabase(ss) {
     sSheet.appendRow(["isCertificateSystemEnabled", "true", "Admin", "2026-08-15 08:00:00"]);
   }
 
-  return { message: "Database tables initialized with secure schemas and hashed seeds." };
+  return { message: "Database tables initialized with secure schemas and hashed seeds. Plaintext passwords migrated." };
 }
+
 
 /**
  * ==========================================================================
@@ -652,9 +748,15 @@ function initDatabase(ss) {
 
 function getTeams(ss, data) {
   ss = ss || getSpreadsheet();
+  data = data || {};
   var rows = getSheetObjects(ss.getSheetByName(SHEETS.TEAMS));
+
+  // Determine caller role for PII redaction
+  var callerRole = (data._session && data._session.Role) ? String(data._session.Role).toUpperCase() : "";
+  var isPrivileged = (callerRole === "ADMIN" || callerRole === "ORGANIZER");
+
   return rows.map(function(r) {
-    return {
+    var team = {
       teamId: r.TeamID,
       teamName: r.TeamName,
       projectTitle: r.ProjectTitle,
@@ -663,21 +765,27 @@ function getTeams(ss, data) {
       college: r.College,
       department: r.Department,
       leaderName: r.LeaderName,
-      leaderEmail: r.LeaderEmail,
-      leaderPhone: r.LeaderPhone,
       member2Name: r.Member2Name,
-      member2Email: r.Member2Email,
       member3Name: r.Member3Name,
-      member3Email: r.Member3Email,
       member4Name: r.Member4Name,
-      member4Email: r.Member4Email,
       status: r.Status || "present",
       locked: r.Locked === true || r.Locked === "true",
       problemSubmitted: r.ProblemSubmitted === true || r.ProblemSubmitted === "true",
       submissionLocked: r.SubmissionLocked === true || r.SubmissionLocked === "true",
-      qrCodeToken: r.QRCodeToken,
       createdAt: r.CreatedAt
     };
+
+    // Only ADMIN/ORGANIZER see PII (emails, phones, QR tokens)
+    if (isPrivileged) {
+      team.leaderEmail = r.LeaderEmail;
+      team.leaderPhone = r.LeaderPhone;
+      team.member2Email = r.Member2Email;
+      team.member3Email = r.Member3Email;
+      team.member4Email = r.Member4Email;
+      team.qrCodeToken = r.QRCodeToken;
+    }
+
+    return team;
   });
 }
 
@@ -771,7 +879,7 @@ function registerTeam(ss, data) {
   ];
 
   teamsSheet.appendRow(row);
-  logActivity(ss, data.markedBy || "Organizer", "Organizer Desk", "organizer", "Team Registered", "Registered team: " + teamName + " (" + teamId + ")");
+  logActivity(ss, data._session.UserID, data._session.Name, data._session.Role, "Team Registered", "Registered team: " + teamName + " (" + teamId + ")");
 
   return {
     teamId: teamId,
@@ -838,7 +946,7 @@ function updateTeam(ss, data) {
       if (data.leaderName) sheet.getRange(i + 1, 8).setValue(data.leaderName);
       if (data.leaderEmail) sheet.getRange(i + 1, 9).setValue(data.leaderEmail);
       if (data.leaderPhone) sheet.getRange(i + 1, 10).setValue(data.leaderPhone);
-      logActivity(ss, "Organizer", "Organizer Desk", "organizer", "Team Updated", "Modified team " + data.teamId);
+      logActivity(ss, data._session.UserID, data._session.Name, data._session.Role, "Team Updated", "Modified team " + data.teamId);
       return { success: true, teamId: data.teamId };
     }
   }
@@ -856,7 +964,7 @@ function deleteTeam(ss, data) {
   for (var i = 1; i < dataRange.length; i++) {
     if (dataRange[i][0] === data.teamId) {
       sheet.deleteRow(i + 1);
-      logActivity(ss, "Admin", "Super Admin", "admin", "Team Deleted", "Deleted team " + data.teamId);
+      logActivity(ss, data._session.UserID, data._session.Name, data._session.Role, "Team Deleted", "Deleted team " + data.teamId);
       return { success: true, teamId: data.teamId };
     }
   }
@@ -873,7 +981,7 @@ function unlockTeam(ss, data) {
     if (dataRange[i][0] === data.teamId) {
       sheet.getRange(i + 1, 22).setValue(false); // ProblemSubmitted
       sheet.getRange(i + 1, 23).setValue(false); // SubmissionLocked
-      logActivity(ss, "Organizer", "Organizer Desk", "organizer", "Team Unlocked", "Unlocked submission for team " + data.teamId);
+      logActivity(ss, data._session.UserID, data._session.Name, data._session.Role, "Team Unlocked", "Unlocked submission for team " + data.teamId);
       return { success: true, teamId: data.teamId, message: "Team submission unlocked for modification." };
     }
   }
@@ -890,7 +998,10 @@ function markAttendance(ss, data) {
   ss = ss || getSpreadsheet();
   data = data || {};
   var rawId = (data.teamId || "").trim();
-  var markedBy = data.markedBy || "Organizer Desk";
+
+  // Server-derived identity from authenticated session
+  var session = data._session;
+  var markedBy = session ? (session.Name + " (" + session.Role + ")") : "System";
   var usedQrToken = (data.qrToken || rawId).trim();
 
   if (!rawId) throw new Error("VALIDATION_ERROR: Team ID or QR token is required.");
@@ -907,7 +1018,7 @@ function markAttendance(ss, data) {
   }
 
   if (!foundTeam) {
-    logActivity(ss, "system", markedBy, "system", "QR Scan Rejected",
+    logActivity(ss, session ? session.UserID : "system", markedBy, "system", "QR Scan Rejected",
       "Unregistered QR/ID presented: " + rawId);
     throw new Error("INVALID_QR: Unregistered or invalid QR badge: " + rawId);
   }
@@ -919,7 +1030,7 @@ function markAttendance(ss, data) {
   var tokenReplayed = attList.find(function(a) { return a.QRTokenUsed === usedQrToken; });
   if (tokenReplayed) {
     logActivity(ss, foundTeam.teamId, foundTeam.teamName, "system",
-      "QR Replay Attack Detected", "Token already used at " + tokenReplayed.CheckInTime);
+      "QR Replay Attack Detected", "Token already used at " + tokenReplayed.CheckInTime + ". Attempted by: " + markedBy);
     throw new Error(
       "QR_REPLAYED: This QR badge has already been used for check-in at " +
       tokenReplayed.CheckInTime + ". Please contact an organizer."
@@ -942,10 +1053,9 @@ function markAttendance(ss, data) {
   var attId = "ATT-" + ("000" + (attList.length + 1)).slice(-3);
   var timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss");
 
-  // Store the specific QR token used — enables replay detection on re-scan
   attSheet.appendRow([attId, foundTeam.teamId, foundTeam.teamName, "present", timestamp, markedBy, usedQrToken]);
-  logActivity(ss, foundTeam.teamId, foundTeam.teamName, "team", "Attendance Check-in",
-    "Checked in by " + markedBy + " using QR token at " + timestamp);
+  logActivity(ss, session ? session.UserID : "system", markedBy, session ? session.Role : "system", "Attendance Check-in",
+    "Checked in " + foundTeam.teamName + " (" + foundTeam.teamId + ") at " + timestamp);
 
   return {
     alreadyCheckedIn: false,
@@ -1012,6 +1122,7 @@ function getJudgeAssignments(ss, data) {
 function saveJudgeAssignments(ss, data) {
   ss = ss || getSpreadsheet();
   data = data || {};
+  var session = data._session; // Server-derived identity
   var assignments = data.assignments || data.judgeAssignments || {};
   var sheet = ss.getSheetByName(SHEETS.JUDGE_ASSIGNMENTS);
   sheet.clearContents();
@@ -1031,7 +1142,8 @@ function saveJudgeAssignments(ss, data) {
     }
   }
 
-  logActivity(ss, "Admin", "Super Admin", "admin", "Judge Assignments Saved", "Updated jury routing matrix with " + count + " assignments.");
+  logActivity(ss, session.UserID, session.Name, session.Role, "Judge Assignments Saved",
+    "Updated jury routing matrix with " + count + " assignments.");
   return { success: true, count: count };
 }
 
@@ -1056,34 +1168,29 @@ function submitEvaluation(ss, data) {
   ss = ss || getSpreadsheet();
   data = data || {};
   var round = (data.round || "round1").toLowerCase();
-  var judgeId = (data.judgeId || "").trim();
-  var judgeName = (data.judgeName || "Jury Panelist").trim();
   var teamId = (data.teamId || "").trim();
-  var teamName = (data.teamName || "").trim();
 
-  if (!judgeId || !teamId) {
-    throw new Error("VALIDATION_ERROR: Judge ID and Team ID are required for evaluation.");
+  // SERVER-DERIVED IDENTITY: Judge identity comes from authenticated session, NEVER the client
+  var session = data._session;
+  if (!session) {
+    throw new Error("AUTH_REQUIRED: Authenticated judge session is required to submit evaluations.");
+  }
+  var judgeId = session.UserID;
+  var judgeName = session.Name;
+
+  if (!teamId) {
+    throw new Error("VALIDATION_ERROR: Team ID is required for evaluation.");
   }
 
-  // OBJECT-LEVEL AUTHORIZATION: If a sessionId was provided, verify the judge
-  // is submitting under their own identity (prevents IDOR: Judge A posting as Judge B)
-  if (data.sessionId) {
-    var sessSheet = ss.getSheetByName(SHEETS.SESSIONS);
-    if (sessSheet) {
-      var sessions = getSheetObjects(sessSheet);
-      var callerSession = sessions.find(function(s) {
-        return s.SessionID === data.sessionId && String(s.Status).toUpperCase() === "ACTIVE";
-      });
-      if (callerSession && callerSession.UserID !== judgeId) {
-        logActivity(ss, callerSession.UserID, callerSession.Name, callerSession.Role,
-          "IDOR Attempt Blocked",
-          "User " + callerSession.UserID + " attempted to submit score as judge " + judgeId);
-        throw new Error(
-          "ACCESS_DENIED: You cannot submit an evaluation under a different judge identity. " +
-          "Your authenticated ID is " + callerSession.UserID + "."
-        );
-      }
-    }
+  // JUDGE ASSIGNMENT ENFORCEMENT: verify judge is assigned to this team
+  var assignments = getSheetObjects(ss.getSheetByName(SHEETS.JUDGE_ASSIGNMENTS));
+  var isAssigned = assignments.some(function(a) {
+    return a.JudgeID === judgeId && a.TeamID === teamId && String(a.Status).toUpperCase() === "ACTIVE";
+  });
+  if (!isAssigned) {
+    logActivity(ss, judgeId, judgeName, "judge", "Unassigned Evaluation Attempt",
+      "Judge " + judgeId + " attempted to score team " + teamId + " but is not assigned.");
+    throw new Error("ACCESS_DENIED: You are not assigned to evaluate team " + teamId + ". Contact admin to update assignments.");
   }
 
   // 1. Check if Winners are already declared — scores immutable after lock
@@ -1101,7 +1208,6 @@ function submitEvaluation(ss, data) {
   }
 
   // 3. Strict Criteria Scores Validation (0 to 25 per criterion, max 100 total)
-  // NOTE: Server calculates total — client MUST NOT send a pre-calculated total.
   var c1 = validateMark(data.c1, 25);
   var c2 = validateMark(data.c2, 25);
   var c3 = validateMark(data.c3, 25);
@@ -1112,6 +1218,13 @@ function submitEvaluation(ss, data) {
     throw new Error("INVALID_SCORE: Total score cannot exceed 100 marks per round.");
   }
 
+  // Resolve team name from server (never trust client-supplied teamName)
+  var teamName = teamId;
+  try {
+    var teamObj = getTeam(ss, teamId);
+    teamName = teamObj.teamName || teamId;
+  } catch (e) { /* use teamId as fallback */ }
+
   var targetSheetName = (round === "round2" || round === "2") ? SHEETS.ROUND2 : SHEETS.ROUND1;
   var sheet = ss.getSheetByName(targetSheetName);
   var existingEvals = getSheetObjects(sheet);
@@ -1120,7 +1233,7 @@ function submitEvaluation(ss, data) {
   for (var i = 0; i < existingEvals.length; i++) {
     var ev = existingEvals[i];
     if (ev.JudgeID === judgeId && ev.TeamID === teamId) {
-      throw new Error("DUPLICATE_EVALUATION: You have already evaluated team " + teamId + " for " + round.toUpperCase() + ". (Evaluation ID: " + ev.EvalID + ")");
+      throw new Error("DUPLICATE_EVALUATION: You have already evaluated team " + teamId + " for " + round.toUpperCase() + ".");
     }
   }
 
@@ -1129,7 +1242,8 @@ function submitEvaluation(ss, data) {
   var comments = (data.comments || "").trim();
 
   sheet.appendRow([evalId, judgeId, judgeName, teamId, teamName, c1, c2, c3, c4, total, comments, timestamp]);
-  logActivity(ss, judgeId, judgeName, "judge", "Evaluation Submitted", "Scored " + teamName + " (" + teamId + ") with " + total + "/100 for " + round.toUpperCase());
+  logActivity(ss, judgeId, judgeName, "judge", "Evaluation Submitted",
+    "Scored " + teamName + " (" + teamId + ") with " + total + "/100 for " + round.toUpperCase());
 
   return {
     success: true,
@@ -1266,7 +1380,8 @@ function declareWinners(ss, data) {
   // Batch Generate Certificates for all teams & participants
   generateAllCertificates(ss, leaderboard);
 
-  logActivity(ss, data.adminId || "ADMIN", "Super Administrator", "admin", "Winners Declared & Locked", "Locked leaderboard. 1st: " + (podium[0] ? podium[0].teamName : "N/A"));
+  var session = data._session;
+  logActivity(ss, session.UserID, session.Name, session.Role, "Winners Declared & Locked", "Locked leaderboard. 1st: " + (podium[0] ? podium[0].teamName : "N/A"));
 
   return {
     success: true,
@@ -1413,7 +1528,7 @@ function createUser(ss, data) {
   var timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss");
 
   sheet.appendRow([userId, data.name || "User", email, passwordHash, (data.role || "judge").toLowerCase(), data.specialization || "General", "active", timestamp]);
-  logActivity(ss, "Admin", "Super Admin", "admin", "User Created", "Created user: " + data.name + " (" + email + ")");
+  logActivity(ss, data._session.UserID, data._session.Name, data._session.Role, "User Created", "Created user: " + data.name + " (" + email + ")");
 
   return { userId: userId, name: data.name, email: email, role: data.role };
 }
@@ -1421,13 +1536,19 @@ function createUser(ss, data) {
 function deleteUser(ss, data) {
   ss = ss || getSpreadsheet();
   data = data || {};
+
+  // SELF-DELETE PREVENTION: Admin cannot delete their own account
+  if (data._session && data.userId === data._session.UserID) {
+    throw new Error("VALIDATION_ERROR: You cannot delete your own admin account.");
+  }
+
   var sheet = ss.getSheetByName(SHEETS.USERS);
   var dataRange = sheet.getDataRange().getValues();
 
   for (var i = 1; i < dataRange.length; i++) {
     if (dataRange[i][0] === data.userId) {
       sheet.deleteRow(i + 1);
-      logActivity(ss, "Admin", "Super Admin", "admin", "User Deleted", "Deleted user " + data.userId);
+      logActivity(ss, data._session.UserID, data._session.Name, data._session.Role, "User Deleted", "Deleted user " + data.userId);
       return { success: true };
     }
   }
@@ -1460,7 +1581,7 @@ function updateRoundStatus(ss, data) {
   for (var i = 1; i < dataRange.length; i++) {
     if (dataRange[i][0] === roundId) {
       sheet.getRange(i + 1, 4).setValue(status);
-      logActivity(ss, "Admin", "Super Admin", "admin", "Round Status Changed", "Set " + roundId + " to " + status.toUpperCase());
+      logActivity(ss, data._session.UserID, data._session.Name, data._session.Role, "Round Status Changed", "Set " + roundId + " to " + status.toUpperCase());
       return { roundId: roundId, status: status };
     }
   }
